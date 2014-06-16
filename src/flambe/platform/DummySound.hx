@@ -7,17 +7,19 @@ package flambe.platform;
 import flambe.animation.AnimatedFloat;
 import flambe.sound.Playback;
 import flambe.sound.Sound;
+import flambe.util.Value;
 
 /**
  * An empty sound used in environments that don't support audio.
  */
-class DummySound
+class DummySound extends BasicAsset<DummySound>
     implements Sound
 {
-    public var duration (get_duration, null) :Float;
+    public var duration (get, null) :Float;
 
     public function new ()
     {
+        super();
         _playback = new DummyPlayback(this);
     }
 
@@ -34,6 +36,16 @@ class DummySound
     public function get_duration () :Float
     {
         return 0;
+    }
+
+    override private function copyFrom (asset :DummySound)
+    {
+        // Nothing at all
+    }
+
+    override private function onDisposed ()
+    {
+        // Nothing at all
     }
 
     public static function getInstance () :DummySound
@@ -54,15 +66,16 @@ class DummyPlayback
     implements Playback
 {
     public var volume (default, null) :AnimatedFloat;
-    public var paused (get_paused, set_paused) :Bool;
-    public var ended (get_ended, null) :Bool;
-    public var position (get_position, null) :Float;
-    public var sound (get_sound, null) :Sound;
+    public var paused (get, set) :Bool;
+    public var complete (get, null) :Value<Bool>;
+    public var position (get, null) :Float;
+    public var sound (get, null) :Sound;
 
     public function new (sound :Sound)
     {
         _sound = sound;
         this.volume = new AnimatedFloat(0); // A little quirky? All DummyPlaybacks share the same volume
+        _complete = new Value<Bool>(true);
     }
 
     public function get_sound () :Sound
@@ -80,9 +93,9 @@ class DummyPlayback
         return true;
     }
 
-    public function get_ended () :Bool
+    public function get_complete () :Value<Bool>
     {
-        return true;
+        return _complete;
     }
 
     public function get_position () :Float
@@ -96,4 +109,6 @@ class DummyPlayback
     }
 
     private var _sound :Sound;
+
+    private var _complete :Value<Bool>;
 }

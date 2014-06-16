@@ -13,6 +13,7 @@ import flambe.math.Point;
 import flambe.math.Rectangle;
 import flambe.scene.Director;
 import flambe.util.Signal1;
+import flambe.util.SignalConnection;
 import flambe.util.Value;
 
 using flambe.util.BitSets;
@@ -67,43 +68,61 @@ class Sprite extends Component
     public var blendMode :BlendMode = null;
 
     /**
-     * <p>The scissor rectangle used for clipping/masking, in the local coordinate system. The
-     * scissor rectangle affects both rendering and hit testing, and applies to this sprite and all
-     * children.</p>
+     * The scissor rectangle used for clipping/masking, in the local coordinate system. The scissor
+     * rectangle affects both rendering and hit testing, and applies to this sprite and all
+     * children. Rectangles with negative width or height are OK.
      *
-     * <p><b>WARNING</b>: When using scissor testing, this sprite (and its parents) must not be
-     * rotated. The scissor rectangle must be axis-aligned when converted to screen coordinates.</p>
+     * __WARNING__: When using scissor testing, this sprite (and its parents) must not be rotated.
+     * The scissor rectangle must be axis-aligned when converted to screen coordinates.
      */
     public var scissor :Rectangle = null;
 
     /**
-     * Whether this sprite should be drawn.
+     * Whether this sprite should be drawn. Invisible sprites do not receive pointer events.
      */
-    public var visible (get_visible, set_visible) :Bool;
+    public var visible (get, set) :Bool;
+
+    /**
+     * Whether this sprite's position will be rounded to the nearest whole pixel when rendering, for
+     * crisper images. Defaults to true. This can be disabled for smoother animation, at the risk of
+     * fuzziness when an image lies on a subpixel.
+     */
+    public var pixelSnapping (get, set) :Bool;
 
     /**
      * Emitted when the pointer is pressed down over this sprite.
      */
-    public var pointerDown (get_pointerDown, null) :Signal1<PointerEvent>;
+    public var pointerDown (get, null) :Signal1<PointerEvent>;
 
     /**
      * Emitted when the pointer is moved over this sprite.
      */
-    public var pointerMove (get_pointerMove, null) :Signal1<PointerEvent>;
+    public var pointerMove (get, null) :Signal1<PointerEvent>;
 
     /**
      * Emitted when the pointer is raised over this sprite.
      */
-    public var pointerUp (get_pointerUp, null) :Signal1<PointerEvent>;
+    public var pointerUp (get, null) :Signal1<PointerEvent>;
+
+    /**
+     * Emitted when the pointer is moved inside of this sprite.
+     */
+    public var pointerIn (get, null) :Signal1<PointerEvent>;
+
+    /**
+     * Emitted when the pointer is moved outside of this sprite. If the pointer is a touch, also
+     * emitted when the touch is lifted from this sprite.
+     */
+    public var pointerOut (get, null) :Signal1<PointerEvent>;
 
     /**
      * Whether this sprite or any children should receive pointer events. Defaults to true.
      */
-    public var pointerEnabled (get_pointerEnabled, set_pointerEnabled) :Bool;
+    public var pointerEnabled (get, set) :Bool;
 
     public function new ()
     {
-        _flags = VISIBLE | POINTER_ENABLED | VIEW_MATRIX_DIRTY;
+        _flags = VISIBLE | POINTER_ENABLED | VIEW_MATRIX_DIRTY | PIXEL_SNAPPING;
         _localMatrix = new Matrix();
 
         var dirtyMatrix = function (_,_) {
@@ -194,7 +213,15 @@ class Sprite extends Component
                 g.setBlendMode(sprite.blendMode);
             }
             var matrix = sprite.getLocalMatrix();
-            g.transform(matrix.m00, matrix.m10, matrix.m01, matrix.m11, matrix.m02, matrix.m12);
+
+            var m02 = matrix.m02;
+            var m12 = matrix.m12;
+            if (sprite.pixelSnapping) {
+                // Snap the translation to the nearest whole pixel
+                m02 = Math.round(m02);
+                m12 = Math.round(m12);
+            }
+            g.transform(matrix.m00, matrix.m10, matrix.m01, matrix.m11, m02, m12);
 
             var scissor = sprite.scissor;
             if (scissor != null) {
@@ -300,7 +327,7 @@ class Sprite extends Component
     }
 
     /**
-     * Convenience method to set the anchor position.
+     * Chainable convenience method to set the anchor position.
      * @returns This instance, for chaining.
      */
     public function setAnchor (x :Float, y :Float) :Sprite
@@ -311,7 +338,7 @@ class Sprite extends Component
     }
 
     /**
-     * Convenience method to center the anchor using the natural width and height.
+     * Chainable convenience method to center the anchor using the natural width and height.
      * @returns This instance, for chaining.
      */
     public function centerAnchor () :Sprite
@@ -322,7 +349,7 @@ class Sprite extends Component
     }
 
     /**
-     * Convenience method to set the position.
+     * Chainable convenience method to set the position.
      * @returns This instance, for chaining.
      */
     public function setXY (x :Float, y :Float) :Sprite
@@ -331,9 +358,29 @@ class Sprite extends Component
         this.y._ = y;
         return this;
     }
+	
+    /**
+     * Chainable convenience method to set the alpha.
+     * @returns This instance, for chaining.
+     */
+    public function setAlpha (alpha :Float) :Sprite
+    {
+        this.alpha._ = alpha;
+        return this;
+    }
+	
+    /**
+     * Chainable convenience method to set the rotation.
+     * @returns This instance, for chaining.
+     */
+    public function setRotation (rotation :Float) :Sprite
+    {
+        this.rotation._ = rotation;
+        return this;
+    }
 
     /**
-     * Convenience method to uniformly set the scale.
+     * Chainable convenience method to uniformly set the scale.
      * @returns This instance, for chaining.
      */
     public function setScale (scale :Float) :Sprite
@@ -344,7 +391,7 @@ class Sprite extends Component
     }
 
     /**
-     * Convenience method to set the scale.
+     * Chainable convenience method to set the scale.
      * @returns This instance, for chaining.
      */
     public function setScaleXY (scaleX :Float, scaleY :Float) :Sprite
@@ -355,13 +402,48 @@ class Sprite extends Component
     }
 
     /**
-     * Convenience method to set pointerEnabled to false.
+     * Chainable convenience method to set the blendMode.
+     * @returns This instance, for chaining.
+     */
+    public function setBlendMode (blendMode :BlendMode) :Sprite
+    {
+        this.blendMode = blendMode;
+        return this;
+    }
+
+    /**
+     * Chainable convenience method to set pointerEnabled to false.
      * @returns This instance, for chaining.
      */
     public function disablePointer () :Sprite
     {
         pointerEnabled = false;
         return this;
+    }
+
+    /**
+     * Chainable convenience method to set pixelSnapping to false.
+     * @returns This instance, for chaining.
+     */
+    public function disablePixelSnapping () :Sprite
+    {
+        pixelSnapping = false;
+        return this;
+    }
+
+    override public function onAdded ()
+    {
+        if (_flags.contains(HOVERING)) {
+            connectHover();
+        }
+    }
+
+    override public function onRemoved ()
+    {
+        if (_hoverConnection != null) {
+            _hoverConnection.dispose();
+            _hoverConnection = null;
+        }
     }
 
     override public function onUpdate (dt :Float)
@@ -415,26 +497,67 @@ class Sprite extends Component
 
     private function get_pointerDown () :Signal1<PointerEvent>
     {
-        if (_internal_pointerDown == null) {
-            _internal_pointerDown = new Signal1();
+        if (_pointerDown == null) {
+            _pointerDown = new Signal1();
         }
-        return _internal_pointerDown;
+        return _pointerDown;
     }
 
     private function get_pointerMove () :Signal1<PointerEvent>
     {
-        if (_internal_pointerMove == null) {
-            _internal_pointerMove = new Signal1();
+        if (_pointerMove == null) {
+            _pointerMove = new Signal1();
         }
-        return _internal_pointerMove;
+        return _pointerMove;
     }
 
     private function get_pointerUp () :Signal1<PointerEvent>
     {
-        if (_internal_pointerUp == null) {
-            _internal_pointerUp = new Signal1();
+        if (_pointerUp == null) {
+            _pointerUp = new Signal1();
         }
-        return _internal_pointerUp;
+        return _pointerUp;
+    }
+
+    private function get_pointerIn () :Signal1<PointerEvent>
+    {
+        if (_pointerIn == null) {
+            _pointerIn = new Signal1();
+        }
+        return _pointerIn;
+    }
+
+    private function get_pointerOut () :Signal1<PointerEvent>
+    {
+        if (_pointerOut == null) {
+            _pointerOut = new Signal1();
+        }
+        return _pointerOut;
+    }
+
+    private function connectHover ()
+    {
+        if (_hoverConnection != null) {
+            return;
+        }
+        _hoverConnection = System.pointer.move.connect(function (event) {
+            // Return early if this sprite was in the event chain
+            var hit = event.hit;
+            while (hit != null) {
+                if (hit == this) {
+                    return;
+                }
+                hit = hit.getParentSprite();
+            }
+
+            // This sprite is not under the pointer
+            if (_pointerOut != null && _flags.contains(HOVERING)) {
+                _pointerOut.emit(event);
+            }
+            _flags = _flags.remove(HOVERING);
+            _hoverConnection.dispose();
+            _hoverConnection = null;
+        });
     }
 
     inline private function get_visible () :Bool
@@ -459,7 +582,70 @@ class Sprite extends Component
         return pointerEnabled;
     }
 
-    private static function hitTestBackwards (entity :Entity, x :Float, y :Float)
+    inline private function get_pixelSnapping () :Bool
+    {
+        return _flags.contains(PIXEL_SNAPPING);
+    }
+
+    private function set_pixelSnapping (pixelSnapping :Bool) :Bool
+    {
+        _flags = _flags.set(PIXEL_SNAPPING, pixelSnapping);
+        return pixelSnapping;
+    }
+
+    @:allow(flambe) function onPointerDown (event :PointerEvent)
+    {
+        onHover(event);
+        if (_pointerDown != null) {
+            _pointerDown.emit(event);
+        }
+    }
+
+    @:allow(flambe) function onPointerMove (event :PointerEvent)
+    {
+        onHover(event);
+        if (_pointerMove != null) {
+            _pointerMove.emit(event);
+        }
+    }
+
+    private function onHover (event :PointerEvent)
+    {
+        if (_flags.contains(HOVERING)) {
+            return; // Already hovering
+        }
+        _flags = _flags.add(HOVERING);
+
+        // Notify listeners and connect the hover-out listener
+        if ((_pointerIn != null || _pointerOut != null)) {
+            if (_pointerIn != null) {
+                _pointerIn.emit(event);
+            }
+            connectHover();
+        }
+    }
+
+    @:allow(flambe) function onPointerUp (event :PointerEvent)
+    {
+        switch (event.source) {
+        case Touch(point):
+            if (_pointerOut != null && _flags.contains(HOVERING)) {
+                _pointerOut.emit(event);
+            }
+            _flags = _flags.remove(HOVERING);
+            if (_hoverConnection != null) {
+                _hoverConnection.dispose();
+                _hoverConnection = null;
+            }
+        default:
+        }
+
+        if (_pointerUp != null) {
+            _pointerUp.emit(event);
+        }
+    }
+
+    private static function hitTestBackwards (entity :Entity, x :Float, y :Float) :Sprite
     {
         if (entity != null) {
             var result = hitTestBackwards(entity.next, x, y);
@@ -540,7 +726,10 @@ class Sprite extends Component
     private static inline var LOCAL_MATRIX_DIRTY = 1 << 2;
     private static inline var VIEW_MATRIX_DIRTY = 1 << 3;
     private static inline var MOVIESPRITE_PAUSED = 1 << 4;
-    private static inline var TEXTSPRITE_DIRTY = 1 << 5;
+    private static inline var MOVIESPRITE_SKIP_NEXT = 1 << 5;
+    private static inline var TEXTSPRITE_DIRTY = 1 << 6;
+    private static inline var PIXEL_SNAPPING = 1 << 7;
+    private static inline var HOVERING = 1 << 8;
 
     private var _flags :Int;
 
@@ -550,7 +739,11 @@ class Sprite extends Component
     private var _viewMatrixUpdateCount :Int = 0;
     private var _parentViewMatrixUpdateCount :Int = 0;
 
-    /** @private */ public var _internal_pointerDown :Signal1<PointerEvent>;
-    /** @private */ public var _internal_pointerMove :Signal1<PointerEvent>;
-    /** @private */ public var _internal_pointerUp :Signal1<PointerEvent>;
+    private var _pointerDown :Signal1<PointerEvent>;
+    private var _pointerMove :Signal1<PointerEvent>;
+    private var _pointerUp :Signal1<PointerEvent>;
+
+    private var _pointerIn :Signal1<PointerEvent>;
+    private var _pointerOut :Signal1<PointerEvent>;
+    private var _hoverConnection :SignalConnection;
 }

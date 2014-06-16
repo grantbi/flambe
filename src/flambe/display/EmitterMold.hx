@@ -5,31 +5,35 @@
 package flambe.display;
 
 import flambe.asset.AssetPack;
+import flambe.asset.File;
 
 using flambe.util.Strings;
 
+enum EmitterType
+{
+    Gravity; Radial;
+}
+
 /**
- * <p>A particle system configuration, that can be used to create emitter sprites. The configuration
- * is loaded from a .pex file, authored in a tool such as Particle Designer.</p>
+ * A particle system configuration, that can be used to create emitter sprites. The configuration is
+ * loaded from a .pex file, authored in a tool such as Particle Designer.
  *
- * <p><b>NOTE</b>: There are some restrictions to keep in mind when using Particle Designer with
- * Flambe:
- * <ul>
- * <li>Particle coloring is not supported.</li>
- * <li>Radial emitters are not (yet) supported.</li>
- * <li>Only normal and additive blend modes are supported.</li>
- * </ul>
- * </p>
+ * _NOTE_: There are some restrictions to keep in mind when using Particle Designer with Flambe:
  *
- * <p>Also keep in mind that gratuitous particle systems are a great way to kill performance,
- * especially on mobile. Try to keep maxParticles as low as possible to achieve the desired
- * effect.</p>
+ * - Particle coloring is not supported.
+ * - Only normal and additive blend modes are supported.
+ *
+ *
+ * Also keep in mind that gratuitous particle systems are a great way to kill performance,
+ * especially on mobile. Try to keep maxParticles as low as possible to achieve the desired effect.
  */
 class EmitterMold
 {
     public var texture :Texture;
 
     public var maxParticles :Int;
+
+    public var type :EmitterType;
 
     // public var emitX :Float;
     public var emitXVariance :Float;
@@ -51,14 +55,16 @@ class EmitterMold
     public var gravityX :Float;
     public var gravityY :Float;
 
-    // public var maxRadius :Float;
-    // public var maxRadiusVariance :Float;
+    public var maxRadius :Float;
+    public var maxRadiusVariance :Float;
+
+    public var minRadius :Float;
 
     public var lifespanVariance :Float;
     public var lifespan :Float;
 
-    // public var rotatePerSecond :Float;
-    // public var rotatePerSecondVariance :Float;
+    public var rotatePerSecond :Float;
+    public var rotatePerSecondVariance :Float;
 
     public var rotationStart :Float;
     public var rotationStartVariance :Float;
@@ -83,16 +89,26 @@ class EmitterMold
 
     public var blendMode :BlendMode;
 
+    /**
+     * Creates an EmitterMold using files in an asset pack.
+     * @param name The path to the particle system within the asset pack, excluding the .pex suffix.
+     */
     public function new (pack :AssetPack, name :String)
     {
+        _file = pack.getFile(name+".pex");
+        var xml = Xml.parse(_file.toString());
+
         var blendFuncSource = 0;
         var blendFuncDestination = 0;
 
-        var xml = Xml.parse(pack.getFile(name+".pex"));
+        // The basename of the pex file's path, where we'll find the textures
+        var idx = name.lastIndexOf("/");
+        var basePath = (idx >= 0) ? name.substr(0, idx+1) : "";
+
         for (element in xml.firstElement().elements()) {
             switch (element.nodeName.toLowerCase()) {
             case "texture":
-                texture = pack.getTexture(element.get("name").removeFileExtension());
+                texture = pack.getTexture(basePath + element.get("name").removeFileExtension());
             case "angle":
                 angle = getValue(element);
             case "anglevariance":
@@ -104,10 +120,7 @@ class EmitterMold
             case "duration":
                 duration = getValue(element);
             case "emittertype":
-                if (getValue(element) != 0) {
-                    // TODO(bruno): Implement radial emitters
-                    Log.warn("Radial emitters are not yet supported", ["emitter", name]);
-                }
+                type = (Std.int(getValue(element)) == 0) ? Gravity : Radial;
             case "finishcolor":
                 alphaEnd = getFloat(element, "alpha");
             case "finishcolorvariance":
@@ -121,12 +134,12 @@ class EmitterMold
                 gravityY = getY(element);
             case "maxparticles":
                 maxParticles = Std.int(getValue(element));
-            // case "maxradius":
-            //     maxRadius = getValue(element);
-            // case "maxradiusvariance":
-            //     maxRadiusVariance = getValue(element);
-            // case "minradius":
-            //     minRadius = getValue(element);
+            case "maxradius":
+                maxRadius = getValue(element);
+            case "maxradiusvariance":
+                maxRadiusVariance = getValue(element);
+            case "minradius":
+                minRadius = getValue(element);
             case "particlelifespan":
                 lifespan = getValue(element);
             case "particlelifespanvariance":
@@ -135,8 +148,10 @@ class EmitterMold
                 radialAccelVariance = getValue(element);
             case "radialacceleration":
                 radialAccel = getValue(element);
-            // case "rotatepersecond":
-            // case "rotatepersecondvariance":
+            case "rotatepersecond":
+                rotatePerSecond = getValue(element);
+            case "rotatepersecondvariance":
+                rotatePerSecondVariance = getValue(element);
             case "rotationend":
                 rotationEnd = getValue(element);
             case "rotationendvariance":
@@ -176,11 +191,23 @@ class EmitterMold
         if (blendFuncSource == 1 && blendFuncDestination == 1) {
             blendMode = Add;
         } else if (blendFuncSource == 1 && blendFuncDestination == 771) {
-            // blendMode = Normal;
+            blendMode = null; // Normal
         } else if (blendFuncSource != 0 || blendFuncDestination != 0) {
             Log.warn("Unsupported particle blend functions", [
                 "emitter", name, "source", blendFuncSource, "dest", blendFuncDestination ]);
         }
+    }
+
+    /**
+     * Disposes the source .pex File used to create this EmitterMold. This can free up some memory,
+     * if you don't intend to recreate this EmitterMold later from the same AssetPack.
+     *
+     * @returns This instance, for chaining.
+     */
+    public function disposeFiles () :EmitterMold
+    {
+        _file.dispose();
+        return this;
     }
 
     /** Creates a new EmitterSprite using this mold. */
@@ -208,4 +235,6 @@ class EmitterMold
     {
         return getFloat(xml, "y");
     }
+
+    private var _file :File;
 }

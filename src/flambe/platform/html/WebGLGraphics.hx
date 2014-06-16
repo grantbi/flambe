@@ -4,18 +4,21 @@
 
 package flambe.platform.html;
 
+import js.html.*;
+import js.html.webgl.*;
+
 import flambe.display.BlendMode;
 import flambe.display.Graphics;
 import flambe.display.Texture;
 import flambe.math.FMath;
 import flambe.math.Matrix;
-import flambe.platform.html.WebGLTypes;
+import flambe.math.Rectangle;
 import flambe.util.Assert;
 
 class WebGLGraphics
-    implements Graphics
+    implements InternalGraphics
 {
-    public function new (gl :RenderingContext, batcher :WebGLBatcher)
+    public function new (batcher :WebGLBatcher, renderTarget :WebGLTextureRoot)
     {
         // Initialize this here to prevent blowing up during static init on browsers without typed
         // array support
@@ -23,8 +26,8 @@ class WebGLGraphics
             _scratchQuadArray = new Float32Array(8);
         }
 
-        _gl = gl;
         _batcher = batcher;
+        _renderTarget = renderTarget;
     }
 
     public function save ()
@@ -42,22 +45,41 @@ class WebGLGraphics
         current.matrix.clone(state.matrix);
         state.alpha = current.alpha;
         state.blendMode = current.blendMode;
+        state.scissor = (current.scissor != null) ? current.scissor.clone(state.scissor) : null;
         _stateList = state;
     }
 
     public function translate (x :Float, y :Float)
     {
-        throw "TODO";
+        var matrix = getTopState().matrix;
+        matrix.m02 += matrix.m00*x + matrix.m01*y;
+        matrix.m12 += matrix.m10*x + matrix.m11*y;
     }
 
     public function scale (x :Float, y :Float)
     {
-        throw "TODO";
+        var matrix = getTopState().matrix;
+        matrix.m00 *= x;
+        matrix.m10 *= x;
+        matrix.m01 *= y;
+        matrix.m11 *= y;
     }
 
     public function rotate (rotation :Float)
     {
-        throw "TODO";
+        var matrix = getTopState().matrix;
+        rotation = FMath.toRadians(rotation);
+        var sin = Math.sin(rotation);
+        var cos = Math.cos(rotation);
+        var m00 = matrix.m00;
+        var m10 = matrix.m10;
+        var m01 = matrix.m01;
+        var m11 = matrix.m11;
+
+        matrix.m00 = m00*cos + m01*sin;
+        matrix.m10 = m10*cos + m11*sin;
+        matrix.m01 = m01*cos - m00*sin;
+        matrix.m11 = m11*cos - m10*sin;
     }
 
     public function transform (m00 :Float, m10 :Float, m01 :Float, m11 :Float, m02 :Float, m12 :Float)
@@ -73,27 +95,29 @@ class WebGLGraphics
         _stateList = _stateList.prev;
     }
 
-    public function drawImage (texture :Texture, x :Float, y :Float)
+    public function drawTexture (texture :Texture, x :Float, y :Float)
     {
-        drawSubImage(texture, x, y, 0, 0, texture.width, texture.height);
+        drawSubTexture(texture, x, y, 0, 0, texture.width, texture.height);
     }
 
-    public function drawSubImage (texture :Texture, destX :Float, destY :Float,
+    public function drawSubTexture (texture :Texture, destX :Float, destY :Float,
         sourceX :Float, sourceY :Float, sourceW :Float, sourceH :Float)
     {
         var state = getTopState();
         var texture :WebGLTexture = cast texture;
+        var root = texture.root;
+        root.assertNotDisposed();
 
         var pos = transformQuad(destX, destY, sourceW, sourceH);
-        var w = texture.width;
-        var h = texture.height;
-        var u1 = texture.maxU*sourceX / w;
-        var v1 = texture.maxV*sourceY / h;
-        var u2 = texture.maxU*(sourceX + sourceW) / w;
-        var v2 = texture.maxV*(sourceY + sourceH) / h;
+        var rootWidth = root.width;
+        var rootHeight = root.height;
+        var u1 = (texture.rootX+sourceX) / rootWidth;
+        var v1 = (texture.rootY+sourceY) / rootHeight;
+        var u2 = u1 + sourceW/rootWidth;
+        var v2 = v1 + sourceH/rootHeight;
         var alpha = state.alpha;
 
-        var offset = _batcher.prepareDrawImage(state.blendMode, texture);
+        var offset = _batcher.prepareDrawTexture(_renderTarget, state.blendMode, state.scissor, texture);
         var data = _batcher.data;
 
         data[  offset] = pos[0];
@@ -125,13 +149,15 @@ class WebGLGraphics
     {
         var state = getTopState();
         var texture :WebGLTexture = cast texture;
+        var root = texture.root;
+        root.assertNotDisposed();
 
         var pos = transformQuad(x, y, width, height);
-        var u2 = texture.maxU * (width / texture.width);
-        var v2 = texture.maxV * (height / texture.height);
+        var u2 = width / root.width;
+        var v2 = height / root.height;
         var alpha = state.alpha;
 
-        var offset = _batcher.prepareDrawPattern(state.blendMode, texture);
+        var offset = _batcher.prepareDrawPattern(_renderTarget, state.blendMode, state.scissor, texture);
         var data = _batcher.data;
 
         data[  offset] = pos[0];
@@ -169,7 +195,7 @@ class WebGLGraphics
         var b = (color & 0x0000ff) / 0x0000ff;
         var a = state.alpha;
 
-        var offset = _batcher.prepareFillRect(state.blendMode);
+        var offset = _batcher.prepareFillRect(_renderTarget, state.blendMode, state.scissor);
         var data = _batcher.data;
 
         data[  offset] = pos[0];
@@ -218,13 +244,56 @@ class WebGLGraphics
 
     public function applyScissor (x :Float, y :Float, width :Float, height :Float)
     {
-        throw "TODO";
+        var state = getTopState();
+        var rect = _scratchQuadArray;
+        rect[0] = x;
+        rect[1] = y;
+        rect[2] = x + width;
+        rect[3] = y + height;
+
+        state.matrix.transformArray(cast rect, 4, cast rect);
+        _inverseProjection.transformArray(cast rect, 4, cast rect);
+
+        x = rect[0];
+        y = rect[1];
+        width = rect[2] - x;
+        height = rect[3] - y;
+
+        // Handle negative rectangles
+        if (width < 0) {
+            x += width;
+            width = -width;
+        }
+        if (height < 0) {
+            y += height;
+            height = -height;
+        }
+
+        state.applyScissor(x, y, width, height);
     }
 
-    public function reset (width :Int, height :Int)
+    public function willRender ()
+    {
+        _batcher.willRender();
+    }
+
+    public function didRender ()
+    {
+        _batcher.didRender();
+    }
+
+    public function onResize (width :Int, height :Int)
     {
         _stateList = new DrawingState();
-        _stateList.matrix.set(2/width, 0, 0, -2/height, -1, 1);
+
+        // Framebuffers need to be vertically flipped
+        var flip = (_renderTarget != null) ? -1 : 1;
+        _stateList.matrix.set(2/width, 0, 0, flip * -2/height, -1, flip);
+
+        // May be used to transform back into screen coordinates
+        _inverseProjection = new Matrix();
+        _inverseProjection.set(2/width, 0, 0, 2/height, -1, -1);
+        _inverseProjection.invert();
     }
 
     inline private function getTopState () :DrawingState
@@ -257,9 +326,10 @@ class WebGLGraphics
     private static var _scratchMatrix = new Matrix();
     private static var _scratchQuadArray :Float32Array = null;
 
-    private var _gl :RenderingContext;
     private var _batcher :WebGLBatcher;
+    private var _renderTarget :WebGLTextureRoot;
 
+    private var _inverseProjection :Matrix = null;
     private var _stateList :DrawingState = null;
 }
 
@@ -268,6 +338,7 @@ private class DrawingState
     public var matrix :Matrix;
     public var alpha :Float;
     public var blendMode :BlendMode;
+    public var scissor :Rectangle = null;
 
     public var prev :DrawingState = null;
     public var next :DrawingState = null;
@@ -277,5 +348,23 @@ private class DrawingState
         matrix = new Matrix();
         alpha = 1;
         blendMode = Normal;
+    }
+
+    public function applyScissor (x :Float, y :Float, width :Float, height :Float)
+    {
+        if (scissor != null) {
+            // Intersection with the previous scissor rectangle
+            var x1 = FMath.max(scissor.x, x);
+            var y1 = FMath.max(scissor.y, y);
+            var x2 = FMath.min(scissor.x + scissor.width, x + width);
+            var y2 = FMath.min(scissor.y + scissor.height, y + height);
+            x = x1;
+            y = y1;
+            width = x2 - x1;
+            height = y2 - y1;
+        } else {
+            scissor = new Rectangle();
+        }
+        scissor.set(Math.round(x), Math.round(y), Math.round(width), Math.round(height));
     }
 }

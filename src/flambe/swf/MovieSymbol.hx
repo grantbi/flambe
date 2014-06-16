@@ -17,14 +17,14 @@ using flambe.util.Arrays;
 class MovieSymbol
     implements Symbol
 {
-    public var name (get_name, null) :String;
+    public var name (get, null) :String;
 
     public var layers (default, null) :Array<MovieLayer>;
 
     /**
      * The total number of frames in this movie.
      */
-    public var frames (default, null) :Int;
+    public var frames (default, null) :Float;
 
     /**
      * The rate that this movie is played, in frames per second.
@@ -41,17 +41,17 @@ class MovieSymbol
         _name = json.id;
         frameRate = lib.frameRate;
 
-        frames = 0;
+        frames = 0.0;
         layers = Arrays.create(json.layers.length);
         for (ii in 0...layers.length) {
             var layer = new MovieLayer(json.layers[ii]);
-            frames = cast Math.max(layer.frames, frames);
+            frames = Math.max(layer.frames, frames);
             layers[ii] = layer;
         }
         duration = frames / frameRate;
     }
 
-    public function get_name () :String
+    inline private function get_name () :String
     {
         return _name;
     }
@@ -68,13 +68,10 @@ class MovieLayer
 {
     public var name (default, null) :String;
     public var keyframes (default, null) :Array<MovieKeyframe>;
-    public var frames (get_frames, null) :Int;
+    public var frames (default, null) :Float;
 
-    /** The symbol in the last keyframe that has one, or null if there are no symbol keyframes. */
-    public var lastSymbol :Symbol = null;
-
-    /** True if this layer contains keyframes with at least two different symbols. */
-    public var multipleSymbols :Bool = false;
+    /** Whether this layer has no symbol instances. */
+    public var empty (default, null) :Bool = true;
 
     public function new (json :LayerFormat)
     {
@@ -85,25 +82,23 @@ class MovieLayer
         for (ii in 0...keyframes.length) {
             prevKf = new MovieKeyframe(json.keyframes[ii], prevKf);
             keyframes[ii] = prevKf;
-        }
-    }
 
-    private function get_frames () :Int
-    {
-        var lastKf = keyframes[keyframes.length - 1];
-        return lastKf.index + Std.int(lastKf.duration);
+            empty = empty && prevKf.symbolName == null;
+        }
+
+        frames = (prevKf != null) ? prevKf.index+prevKf.duration : 0;
     }
 }
 
 class MovieKeyframe
 {
-    public var index (default, null) :Int;
+    public var index (default, null) :Float;
 
     /** The length of this keyframe in frames. */
-    public var duration (default, null) :Int;
+    public var duration (default, null) :Float;
 
-    public var symbolName (default, null) :String;
-    public var symbol :Symbol = null;
+    @:allow(flambe) var symbolName (default, null) :String;
+    public var symbol (default, null) :Symbol = null;
 
     public var label (default, null) :String;
 
@@ -174,5 +169,15 @@ class MovieKeyframe
         if (json.ease != null) {
             ease = json.ease;
         }
+    }
+
+    @:allow(flambe) inline function setVisible (visible :Bool)
+    {
+        this.visible = visible;
+    }
+
+    @:allow(flambe) inline function setSymbol (symbol :Symbol)
+    {
+        this.symbol = symbol;
     }
 }

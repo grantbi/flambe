@@ -4,9 +4,10 @@
 
 package flambe.platform.flash;
 
-#if flambe_air
+#if air
 import flash.events.StageOrientationEvent;
 #end
+import flash.display.Stage;
 import flash.display.StageDisplayState;
 import flash.events.Event;
 import flash.events.FullScreenEvent;
@@ -15,24 +16,24 @@ import flash.media.Video;
 import flash.system.Capabilities;
 
 import flambe.display.Orientation;
-import flambe.display.Stage;
+import flambe.subsystem.StageSystem;
 import flambe.util.Signal0;
 import flambe.util.Value;
 
 class FlashStage
-    implements Stage
+    implements StageSystem
 {
-    public var width (get_width, null) :Int;
-    public var height (get_height, null) :Int;
+    public var width (get, null) :Int;
+    public var height (get, null) :Int;
     public var orientation (default, null) :Value<Orientation>;
     public var fullscreen (default, null) :Value<Bool>;
-    public var fullscreenSupported (get_fullscreenSupported, null) :Bool;
+    public var fullscreenSupported (get, null) :Bool;
 
     public var resize (default, null) :Signal0;
 
-    public var nativeStage (default, null) :flash.display.Stage;
+    public var nativeStage (default, null) :Stage;
 
-    public function new (nativeStage :flash.display.Stage)
+    public function new (nativeStage :Stage)
     {
         this.nativeStage = nativeStage;
         resize = new Signal0();
@@ -47,7 +48,7 @@ class FlashStage
         onFullscreen();
 
         orientation = new Value<Orientation>(null);
-#if flambe_air
+#if air
         nativeStage.addEventListener(StageOrientationEvent.ORIENTATION_CHANGE, onOrientationChange);
         onOrientationChange();
 #end
@@ -68,7 +69,7 @@ class FlashStage
         return nativeStage.allowsFullScreen;
     }
 
-#if flambe_air
+#if air
     public function lockOrientation (orient :Orientation)
     {
         nativeStage.autoOrients = true;

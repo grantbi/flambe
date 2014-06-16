@@ -4,12 +4,12 @@
 
 package flambe.platform;
 
-import flambe.storage.Storage;
+import flambe.subsystem.StorageSystem;
 
 class DummyStorage
-    implements Storage
+    implements StorageSystem
 {
-    public var supported (get_supported, null) :Bool;
+    public var supported (get, null) :Bool;
 
     public function new ()
     {
@@ -39,8 +39,8 @@ class DummyStorage
 
     public function clear ()
     {
-        _hash = new Hash();
+        _hash = new Map<String,Dynamic>();
     }
 
-    private var _hash :Hash<Dynamic>;
+    private var _hash :Map<String,Dynamic>;
 }

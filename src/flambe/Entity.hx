@@ -5,7 +5,9 @@
 package flambe;
 
 #if macro
+import haxe.macro.Context;
 import haxe.macro.Expr;
+using haxe.macro.ExprTools;
 #end
 
 import flambe.util.Disposable;
@@ -13,12 +15,12 @@ import flambe.util.Disposable;
 using Lambda;
 
 /**
- * <p>A node in the entity hierarchy, and a collection of components.</p>
+ * A node in the entity hierarchy, and a collection of components.
  *
- * <p>To iterate over the hierarchy, use the parent, firstChild, next and firstComponent fields. For
- * example:</p>
+ * To iterate over the hierarchy, use the parent, firstChild, next and firstComponent fields. For
+ * example:
  *
- * <pre>
+ * ```haxe
  * // Iterate over entity's children
  * var child = entity.firstChild;
  * while (child != null) {
@@ -26,7 +28,7 @@ using Lambda;
  *     process(child);
  *     child = next;
  * }
- * </pre>
+ * ```
  */
 @:final class Entity
     implements Disposable
@@ -53,7 +55,7 @@ using Lambda;
     }
 
     /**
-     * Add a component to this entity.
+     * Add a component to this entity. Any previous component of this type will be replaced.
      * @returns This instance, for chaining.
      */
     public function add (component :Component) :Entity
@@ -80,12 +82,12 @@ using Lambda;
             p = p.next;
         }
         if (tail != null) {
-            tail._internal_setNext(component);
+            tail.setNext(component);
         } else {
             firstComponent = component;
         }
 
-        component._internal_init(this, null);
+        component.init(this, null);
         component.onAdded();
 
         return this;
@@ -93,8 +95,9 @@ using Lambda;
 
     /**
      * Remove a component from this entity.
+     * @return Whether the component was removed.
      */
-    public function remove (component :Component)
+    public function remove (component :Component) :Bool
     {
         var prev :Component = null, p = firstComponent;
         while (p != null) {
@@ -104,7 +107,7 @@ using Lambda;
                 if (prev == null) {
                     firstComponent = next;
                 } else {
-                    prev._internal_init(this, next);
+                    prev.init(this, next);
                 }
 
                 // Remove it from the _compMap
@@ -116,45 +119,71 @@ using Lambda;
 
                 // Notify the component it was removed
                 p.onRemoved();
-                p._internal_init(null, null);
-                return;
+                p.init(null, null);
+                return true;
             }
             prev = p;
             p = next;
         }
+        return false;
     }
 
     /**
-     * Gets a component of a given class from this entity.
+     * Gets a component of a given type from this entity.
      */
-    @:macro
-    public function get<A> (self :Expr, componentClass :ExprRequire<Class<A>>) :ExprRequire<A>
+#if (display || dox)
+    public function get<A:Component> (componentClass :Class<A>) :A return null;
+
+#else
+    macro public function get<A> (self :Expr, componentClass :ExprOf<Class<A>>) :ExprOf<A>
     {
-        // Rewrites self.get(ComponentClass) to ComponentClass.getFrom(self)
-        return {
-            expr: ECall({
-                expr: EType(componentClass, "getFrom"),
-                pos: self.pos
-            }, [ self ]),
-            pos: self.pos
-        };
+        var path = getClassPathFromExpr(componentClass);
+        if (path != null)
+        {
+            var type = Context.getType(path.join("."));
+
+            if (Context.unify(type, Context.getType("flambe.Component"))) {
+                // Delegate through getComponentTyped to avoid a (slow) typed cast
+                return macro $self._internal_getComponentTyped($componentClass.NAME, $componentClass);
+            }            
+        }
+
+        Context.error("Expected a class that extends Component, got " + componentClass.toString(),
+            Context.currentPos());
+        return null;
     }
 
-    /**
-     * Checks if this entity has a component of the given class.
-     */
-    @:macro
-    public function has<A> (self :Expr, componentClass :ExprRequire<Class<A>>) :ExprRequire<Bool>
+#if macro
+    static function getClassPathFromExpr<A> (componentClass :ExprOf<Class<A>>) :Array<String>
     {
-        // Rewrites self.has(ComponentClass) to ComponentClass.hasIn(self)
-        return {
-            expr: ECall({
-                expr: EType(componentClass, "hasIn"),
-                pos: self.pos
-            }, [ self ]),
-            pos: self.pos
-        };
+        switch (componentClass.expr) {
+        case EConst(CIdent(name)):
+            return [name];
+        case EField(e, name):
+            var path = getClassPathFromExpr(e);
+            if (path != null)
+                path.push(name);
+            return path;
+        default:
+            return null;
+        }
     }
+#end
+
+#end
+
+    /**
+     * Checks if this entity has a component of the given type.
+     */
+#if (display || dox)
+    public function has<A:Component> (componentClass :Class<A>) :Bool return false;
+
+#else
+    macro public function has<A> (self :Expr, componentClass :ExprOf<Class<A>>) :ExprOf<Bool>
+    {
+        return macro $self.get($componentClass) != null;
+    }
+#end
 
     /**
      * Gets a component by name from this entity.
@@ -169,7 +198,7 @@ using Lambda;
      * @param append Whether to add the entity to the end or beginning of the child list.
      * @returns This instance, for chaining.
      */
-    public function addChild (entity :Entity, append :Bool=true)
+    public function addChild (entity :Entity, append :Bool=true) :Entity
     {
         if (entity.parent != null) {
             entity.parent.removeChild(entity);
@@ -279,8 +308,17 @@ using Lambda;
         return output;
     }
 
+    // A semi-private helper method used by Entity.get()
+#if !display
+    @:extern // Inline even in debug builds
+    inline public function _internal_getComponentTyped<A:Component> (name :String, cl :Class<A>) :A
+    {
+        return cast getComponent(name);
+    }
+#end
+
     /**
-     * Maps String -> Component. Usually you would use a Haxe Hash here, but I'm dropping down to plain
+     * Maps String -> Component. Usually you would use a Haxe Map here, but I'm dropping down to plain
      * Object/Dictionary for the quickest possible lookups in this critical part of Flambe.
      */
     private var _compMap :Dynamic<Component>;

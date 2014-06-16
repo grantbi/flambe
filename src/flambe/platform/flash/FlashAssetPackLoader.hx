@@ -46,7 +46,9 @@ class FlashAssetPackLoader extends BasicAssetPackLoader
             dispatcher = loader.contentLoaderInfo;
             create = function () {
                 var bitmap :Bitmap = cast loader.content;
-                return _platform.getRenderer().createTexture(bitmap.bitmapData);
+                var texture = _platform.getRenderer().createTextureFromImage(bitmap.bitmapData);
+                bitmap.bitmapData.dispose();
+                return texture;
             };
 
             var ctx = new LoaderContext();
@@ -63,7 +65,7 @@ class FlashAssetPackLoader extends BasicAssetPackLoader
         case Data:
             var urlLoader = new URLLoader(req);
             dispatcher = urlLoader;
-            create = function () return urlLoader.data;
+            create = function () return new BasicFile(urlLoader.data);
 
         default:
             // Should never happen

@@ -5,8 +5,10 @@
 package flambe.input;
 
 /**
- * Represents an event coming from a mouse. NOTE: For performance reasons, MouseEvent instances are
- * reused by Flambe. Use clone() to retain a reference to an event.
+ * Represents an event coming from a mouse.
+ *
+ * _NOTE_: For performance reasons, MouseEvent instances are reused by Flambe. Use `clone()` to
+ * retain a reference to an event.
  */
 class MouseEvent
 {
@@ -30,9 +32,9 @@ class MouseEvent
      */
     public var id (default, null) :Int;
 
-    /** @private */ public function new ()
+    @:allow(flambe) function new ()
     {
-        _internal_init(0, 0, 0, null);
+        init(0, 0, 0, null);
     }
 
     /**
@@ -41,12 +43,11 @@ class MouseEvent
     public function clone () :MouseEvent
     {
         var event = new MouseEvent();
-        event._internal_init(id, viewX, viewY, button);
+        event.init(id, viewX, viewY, button);
         return event;
     }
 
-    /** @private */ public function _internal_init (
-        id :Int, viewX :Float, viewY :Float, button :MouseButton)
+    @:allow(flambe) function init (id :Int, viewX :Float, viewY :Float, button :MouseButton)
     {
         this.id = id;
         this.viewX = viewX;

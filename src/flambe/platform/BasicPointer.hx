@@ -4,27 +4,26 @@
 
 package flambe.platform;
 
-import flambe.Entity;
 import flambe.display.Sprite;
-import flambe.input.Pointer;
 import flambe.input.PointerEvent;
 import flambe.math.Point;
 import flambe.scene.Director;
+import flambe.subsystem.PointerSystem;
 import flambe.util.Signal1;
 
 using Lambda;
 
 class BasicPointer
-    implements Pointer
+    implements PointerSystem
 {
-    public var supported (get_supported, null) :Bool;
+    public var supported (get, null) :Bool;
 
     public var down (default, null) :Signal1<PointerEvent>;
     public var move (default, null) :Signal1<PointerEvent>;
     public var up (default, null) :Signal1<PointerEvent>;
 
-    public var x (get_x, null) :Float;
-    public var y (get_y, null) :Float;
+    public var x (get, null) :Float;
+    public var y (get, null) :Float;
 
     public function new (x :Float = 0, y :Float = 0, isDown :Bool = false)
     {
@@ -64,6 +63,8 @@ class BasicPointer
         if (_isDown) {
             return; // Ignore repeat down events
         }
+        // Ensure a move event is sent first
+        submitMove(viewX, viewY, source);
         _isDown = true;
 
         // Take a snapshot of the entire event bubbling chain
@@ -83,13 +84,9 @@ class BasicPointer
         // Finally, emit the event up the chain
         prepare(viewX, viewY, hit, source);
         for (sprite in chain) {
-            // Avoid calling the public getter and lazily instanciating this signal
-            var signal = sprite._internal_pointerDown;
-            if (signal != null) {
-                signal.emit(_sharedEvent);
-                if (_sharedEvent._internal_stopped) {
-                    return;
-                }
+            sprite.onPointerDown(_sharedEvent);
+            if (_sharedEvent._stopped) {
+                return;
             }
         }
         down.emit(_sharedEvent);
@@ -100,6 +97,10 @@ class BasicPointer
      */
     public function submitMove (viewX :Float, viewY :Float, source :EventSource)
     {
+        if (viewX == _x && viewY == _y) {
+            return; // Ignore repeated duplicate move events
+        }
+
         // Take a snapshot of the entire event bubbling chain
         var chain = [];
         var hit = Sprite.hitTest(System.root, viewX, viewY);
@@ -117,13 +118,9 @@ class BasicPointer
         // Finally, emit the event up the chain
         prepare(viewX, viewY, hit, source);
         for (sprite in chain) {
-            // Avoid calling the public getter and lazily instanciating this signal
-            var signal = sprite._internal_pointerMove;
-            if (signal != null) {
-                signal.emit(_sharedEvent);
-                if (_sharedEvent._internal_stopped) {
-                    return;
-                }
+            sprite.onPointerMove(_sharedEvent);
+            if (_sharedEvent._stopped) {
+                return;
             }
         }
         move.emit(_sharedEvent);
@@ -137,6 +134,8 @@ class BasicPointer
         if (!_isDown) {
             return; // Ignore repeat up events
         }
+        // Ensure a move event is sent first
+        submitMove(viewX, viewY, source);
         _isDown = false;
 
         // Take a snapshot of the entire event bubbling chain
@@ -156,13 +155,9 @@ class BasicPointer
         // Finally, emit the event up the chain
         prepare(viewX, viewY, hit, source);
         for (sprite in chain) {
-            // Avoid calling the public getter and lazily instanciating this signal
-            var signal = sprite._internal_pointerUp;
-            if (signal != null) {
-                signal.emit(_sharedEvent);
-                if (_sharedEvent._internal_stopped) {
-                    return;
-                }
+            sprite.onPointerUp(_sharedEvent);
+            if (_sharedEvent._stopped) {
+                return;
             }
         }
         up.emit(_sharedEvent);
@@ -172,7 +167,7 @@ class BasicPointer
     {
         _x = viewX;
         _y = viewY;
-        _sharedEvent._internal_init(_sharedEvent.id+1, viewX, viewY, hit, source);
+        _sharedEvent.init(_sharedEvent.id+1, viewX, viewY, hit, source);
     }
 
     private static var _sharedEvent = new PointerEvent();

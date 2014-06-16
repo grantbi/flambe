@@ -14,6 +14,24 @@ class Rectangle
     public var width :Float;
     public var height :Float;
 
+    /** The X-coordinate of the left side of the rectangle. */
+    public var left (get, null) :Float;
+
+    /** The X-coordinate of the right side of the rectangle. */
+    public var right (get, null) :Float;
+
+    /** The Y-coordinate of the top side of the rectangle. */
+    public var top (get, null) :Float;
+
+    /** The Y-coordinate of the bottom side of the rectangle. */
+    public var bottom (get, null) :Float;
+
+    /** The X-coordinate of the center of the rectangle. */
+    public var centerX (get, null) :Float;
+
+    /** The Y-coordinate of the center of the rectangle. */
+    public var centerY (get, null) :Float;
+
     public function new (x :Float = 0, y :Float = 0, width :Float = 0, height :Float = 0)
     {
         set(x, y, width, height);
@@ -32,10 +50,56 @@ class Rectangle
      */
     public function contains (x :Float, y :Float) :Bool
     {
+        // A little more complicated than usual due to proper handling of negative widths/heights
+
         x -= this.x;
+        if (width >= 0) {
+            if (x < 0 || x > width) {
+                return false;
+            }
+        } else if (x > 0 || x < width) {
+            return false;
+        }
+
         y -= this.y;
-        return x >= 0 && y >= 0 && x <= width && y <= height;
+        if (height >= 0) {
+            if (y < 0 || y > height) {
+                return false;
+            }
+        } else if (y > 0 || y < height) {
+            return false;
+        }
+
+        return true;
     }
+
+    /**
+     * Returns whether this rectangle intersects another rectangle.
+     *
+     * @param rect The other rectangle to check for intersection.
+     * @param result If supplied and the rectangles intersect, will be set to the calculated
+     *   intersection rectangle.
+     */
+    public function intersects (rect :Rectangle, ?result: Rectangle) :Bool
+    {
+        var left = FMath.max(x, rect.x);
+        var right = FMath.max(x+width, rect.x+rect.width);
+        if (left > right) {
+            return false;
+        }
+
+        var top = FMath.max(y, rect.y);
+        var bottom = FMath.max(y+height, rect.y+rect.height);
+        if (top > bottom) {
+            return false;
+        }
+
+        if (result != null) {
+            result.set(left, top, right-left, bottom-top);
+        }
+        return true;
+    }
+
 
     /**
      * Creates a copy of this rectangle.
@@ -49,8 +113,43 @@ class Rectangle
         return result;
     }
 
+    public function equals (other :Rectangle) :Bool
+    {
+        return x == other.x && y == other.y && width == other.width && height == other.height;
+    }
+
     #if debug @:keep #end public function toString () :String
     {
         return "(" + x + "," + y + " " + width + "x" + height + ")";
+    }
+
+    inline private function get_left () :Float
+    {
+        return x;
+    }
+
+    inline private function get_top () :Float
+    {
+        return y;
+    }
+
+    private function get_right () :Float
+    {
+        return x + width;
+    }
+
+    private function get_bottom () :Float
+    {
+        return y + height;
+    }
+
+    private function get_centerX () :Float
+    {
+        return x + width/2;
+    }
+
+    private function get_centerY () :Float
+    {
+        return y + height/2;
     }
 }

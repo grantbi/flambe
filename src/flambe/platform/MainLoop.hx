@@ -12,6 +12,7 @@ import flambe.display.Sprite;
 import flambe.scene.Director;
 
 using Lambda;
+using flambe.util.Arrays;
 
 /**
  * Updates all components and renders.
@@ -54,10 +55,11 @@ class MainLoop
         updateEntity(System.root, dt);
     }
 
-    public function render (renderer :Renderer)
+    public function render<A> (renderer :InternalRenderer<A>)
     {
-        var graphics = renderer.willRender();
+        var graphics = renderer.graphics;
         if (graphics != null) {
+            renderer.willRender();
             Sprite.render(System.root, graphics);
             renderer.didRender();
         }
@@ -82,7 +84,7 @@ class MainLoop
         // Handle update speed adjustment
         var speed = entity.get(SpeedAdjuster);
         if (speed != null) {
-            speed._internal_realDt = dt;
+            speed._realDt = dt;
 
             dt *= speed.scale._;
             if (dt <= 0) {

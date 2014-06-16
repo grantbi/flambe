@@ -14,7 +14,11 @@ import flambe.util.Value;
  */
 class AnimatedFloat extends Value<Float>
 {
-    public var behavior (get_behavior, set_behavior) :Behavior;
+    /**
+     * The behavior that is currently animating the value, or null if the value is not being
+     * animated.
+     */
+    public var behavior (get, set) :Behavior;
 
     public function new (value :Float, ?listener :Listener2<Float,Float>)
     {
@@ -37,17 +41,39 @@ class AnimatedFloat extends Value<Float>
         }
     }
 
+    /**
+     * Animates between the two given values.
+     *
+     * @param from The initial value.
+     * @param to The target value.
+     * @param seconds The animation duration, in seconds.
+     * @param easing The easing function to use, defaults to `Ease.linear`.
+     */
     public function animate (from :Float, to :Float, seconds :Float, ?easing :EaseFunction)
     {
         set__(from);
         animateTo(to, seconds, easing);
     }
 
+    /**
+     * Animates between the current value and the given value.
+     *
+     * @param to The target value.
+     * @param seconds The animation duration, in seconds.
+     * @param easing The easing function to use, defaults to `Ease.linear`.
+     */
     public function animateTo (to :Float, seconds :Float, ?easing :EaseFunction)
     {
         behavior = new Tween(_value, to, seconds, easing);
     }
 
+    /**
+     * Animates the current value by the given delta.
+     *
+     * @param by The delta added to the current value to get the target value.
+     * @param seconds The animation duration, in seconds.
+     * @param easing The easing function to use, defaults to `Ease.linear`.
+     */
     public function animateBy (by :Float, seconds :Float, ?easing :EaseFunction)
     {
         behavior = new Tween(_value, _value + by, seconds, easing);
@@ -70,5 +96,5 @@ class AnimatedFloat extends Value<Float>
         return _behavior;
     }
 
-    private var _behavior :Behavior;
+    private var _behavior :Behavior = null;
 }

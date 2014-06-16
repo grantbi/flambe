@@ -4,8 +4,11 @@
 
 package flambe.platform.shader;
 
+import js.html.*;
+import js.html.webgl.*;
+import js.html.webgl.RenderingContext;
+
 import flambe.platform.html.WebGLTexture;
-import flambe.platform.html.WebGLTypes;
 
 class DrawPatternGL extends ShaderGL
 {
@@ -32,10 +35,10 @@ class DrawPatternGL extends ShaderGL
             "varying lowp float v_alpha;",
 
             "uniform lowp sampler2D u_texture;",
-            "uniform mediump vec2 u_maxUV;",
+            "uniform mediump vec4 u_region;",
 
             "void main (void) {",
-                "gl_FragColor = texture2D(u_texture, mod(v_uv, u_maxUV)) * v_alpha;",
+                "gl_FragColor = texture2D(u_texture, u_region.xy + mod(v_uv, u_region.zw)) * v_alpha;",
             "}",
         ].join("\n"));
 
@@ -44,7 +47,7 @@ class DrawPatternGL extends ShaderGL
         a_alpha = getAttribLocation("a_alpha");
 
         u_texture = getUniformLocation("u_texture");
-        u_maxUV = getUniformLocation("u_maxUV");
+        u_region = getUniformLocation("u_region");
         setTexture(0);
     }
 
@@ -53,9 +56,9 @@ class DrawPatternGL extends ShaderGL
         _gl.uniform1i(u_texture, unit);
     }
 
-    public function setMaxUV (maxU :Float, maxV :Float)
+    public function setRegion (x :Float, y :Float, width :Float, height :Float)
     {
-        _gl.uniform2f(u_maxUV, maxU, maxV);
+        _gl.uniform4f(u_region, x, y, width, height);
     }
 
     override public function prepare ()
@@ -64,11 +67,11 @@ class DrawPatternGL extends ShaderGL
         _gl.enableVertexAttribArray(a_uv);
         _gl.enableVertexAttribArray(a_alpha);
 
-        var bytesPerFloat = 4;
+        var bytesPerFloat = Float32Array.BYTES_PER_ELEMENT;
         var stride = 5*bytesPerFloat;
-        _gl.vertexAttribPointer(a_pos, 2, _gl.FLOAT, false, stride, 0*bytesPerFloat);
-        _gl.vertexAttribPointer(a_uv, 2, _gl.FLOAT, false, stride, 2*bytesPerFloat);
-        _gl.vertexAttribPointer(a_alpha, 1, _gl.FLOAT, false, stride, 4*bytesPerFloat);
+        _gl.vertexAttribPointer(a_pos, 2, GL.FLOAT, false, stride, 0*bytesPerFloat);
+        _gl.vertexAttribPointer(a_uv, 2, GL.FLOAT, false, stride, 2*bytesPerFloat);
+        _gl.vertexAttribPointer(a_alpha, 1, GL.FLOAT, false, stride, 4*bytesPerFloat);
     }
 
     private var a_pos :Int;
@@ -76,5 +79,5 @@ class DrawPatternGL extends ShaderGL
     private var a_alpha :Int;
 
     private var u_texture :UniformLocation;
-    private var u_maxUV :UniformLocation;
+    private var u_region :UniformLocation;
 }

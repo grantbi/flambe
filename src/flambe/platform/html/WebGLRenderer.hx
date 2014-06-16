@@ -4,66 +4,121 @@
 
 package flambe.platform.html;
 
-import js.Lib;
+import js.html.webgl.*;
 
-import flambe.display.Graphics;
-import flambe.display.Texture;
-import flambe.platform.html.WebGLTypes;
+import haxe.io.Bytes;
 
-// TODO(bruno): Handle GL context loss
+import flambe.asset.AssetEntry;
+import flambe.subsystem.RendererSystem;
+import flambe.util.Assert;
+import flambe.util.Value;
+
 class WebGLRenderer
-    implements Renderer
+    implements InternalRenderer<Dynamic>
 {
+    public var type (get, null) :RendererType;
+    public var maxTextureSize (get, null) :Int;
+    public var hasGPU (get, null) :Value<Bool>;
+
+    public var graphics :InternalGraphics;
+
     public var gl (default, null) :RenderingContext;
     public var batcher (default, null) :WebGLBatcher;
 
     public function new (stage :HtmlStage, gl :RenderingContext)
     {
-        Log.info("Using experimental WebGL renderer");
-
+        _hasGPU = new Value<Bool>(true);
         this.gl = gl;
-        batcher = new WebGLBatcher(gl);
-        _graphics = new WebGLGraphics(gl, batcher);
 
-        gl.clearColor(0, 0, 0, 1);
-        gl.enable(gl.BLEND);
-        gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
+        // Handle GL context loss
+        gl.canvas.addEventListener("webglcontextlost", function (event) {
+            event.preventDefault();
+            Log.warn("WebGL context lost");
+            _hasGPU._ = false;
+        }, false);
+        gl.canvas.addEventListener("webglcontextrestore", function (event) {
+            Log.warn("WebGL context restored");
+            init();
+            _hasGPU._ = true;
+        }, false);
 
         stage.resize.connect(onResize);
-        onResize();
+        init();
     }
 
-    public function createTexture (image :Dynamic) :WebGLTexture
+    inline private function get_type () :RendererType
     {
-        var texture = createEmptyTexture(image.width, image.height);
-        texture.uploadImageData(image);
-        return texture;
+        return WebGL;
     }
 
-    public function createEmptyTexture (width :Int, height :Int) :WebGLTexture
+    private function get_maxTextureSize () :Int
     {
-        return new WebGLTexture(this, width, height);
+        return gl.getParameter(GL.MAX_TEXTURE_SIZE);
     }
 
-    public function willRender () :Graphics
+    inline private function get_hasGPU () :Value<Bool>
     {
-        batcher.willRender();
-        return _graphics;
+        return _hasGPU;
+    }
+
+    public function createTextureFromImage (image :Dynamic) :WebGLTexture
+    {
+        if (gl.isContextLost()) {
+            return null;
+        }
+        var root = new WebGLTextureRoot(this, image.width, image.height);
+        root.uploadImageData(image);
+        return root.createTexture(image.width, image.height);
+    }
+
+    public function createTexture (width :Int, height :Int) :WebGLTexture
+    {
+        if (gl.isContextLost()) {
+            return null;
+        }
+        var root = new WebGLTextureRoot(this, width, height);
+        root.clear();
+        return root.createTexture(width, height);
+    }
+
+    public function getCompressedTextureFormats () :Array<AssetFormat>
+    {
+        // TODO(bruno): Detect supported texture extensions
+        return [];
+    }
+
+    public function createCompressedTexture (format :AssetFormat, data :Bytes) :WebGLTexture
+    {
+        if (gl.isContextLost()) {
+            return null;
+        }
+        Assert.fail(); // Unsupported
+        return null;
+    }
+
+    public function willRender ()
+    {
+        graphics.willRender();
     }
 
     public function didRender ()
     {
-        batcher.didRender();
+        graphics.didRender();
     }
 
     private function onResize ()
     {
-        var width = gl.canvas.width;
-        var height = gl.canvas.height;
-
-        gl.viewport(0, 0, width, height);
-        _graphics.reset(width, height);
+        var width = gl.canvas.width, height = gl.canvas.height;
+        batcher.resizeBackbuffer(width, height);
+        graphics.onResize(width, height);
     }
 
-    private var _graphics :WebGLGraphics;
+    private function init ()
+    {
+        batcher = new WebGLBatcher(gl);
+        graphics = new WebGLGraphics(batcher, null);
+        onResize();
+    }
+
+    private var _hasGPU :Value<Bool>;
 }

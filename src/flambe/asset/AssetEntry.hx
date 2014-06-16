@@ -12,8 +12,11 @@ enum AssetFormat
     // Images
     WEBP; JXR; PNG; JPG; GIF;
 
+    // Compressed textures
+    DDS; PVR; PKM;
+
     // Audio
-    MP3; M4A; OGG; WAV;
+    MP3; M4A; OPUS; OGG; WAV;
 
     // Raw text/data
     Data;
@@ -30,8 +33,8 @@ class AssetEntry
     public var name (default, null) :String;
 
     /**
-     * The URL or file path this asset will be loaded from. May be appended to
-     * Manifest.relativeBasePath or externalBasePath to get the actual URL to load from.
+     * The URL or file path this asset will be loaded from. Will be appended to `Manifest.localBase`
+     * or `Manifest.remoteBase` to get the actual URL to load from.
      */
     public var url (default, null) :String;
 

@@ -4,30 +4,17 @@
 
 package flambe.platform.html;
 
-import js.Lib;
+import js.Browser;
+import js.html.*;
 
-import flambe.Entity;
-import flambe.System;
 import flambe.asset.AssetPack;
 import flambe.asset.Manifest;
-import flambe.display.Stage;
 import flambe.display.Texture;
-import flambe.external.External;
-import flambe.input.Keyboard;
-import flambe.input.Motion;
-import flambe.input.Mouse;
-import flambe.input.Pointer;
-import flambe.input.Touch;
-import flambe.platform.BasicKeyboard;
-import flambe.platform.BasicPointer;
-import flambe.platform.MainLoop;
-import flambe.platform.Platform;
-import flambe.storage.Storage;
+import flambe.subsystem.*;
 import flambe.util.Assert;
 import flambe.util.Logger;
 import flambe.util.Promise;
 import flambe.util.Signal1;
-import flambe.web.Web;
 
 class HtmlPlatform
     implements Platform
@@ -35,6 +22,7 @@ class HtmlPlatform
     public static var instance (default, null) :HtmlPlatform = new HtmlPlatform();
 
     public var mainLoop (default, null) :MainLoop;
+    public var musicPlaying :Bool;
 
     private function new ()
     {
@@ -42,24 +30,34 @@ class HtmlPlatform
 
     public function init ()
     {
-        Log.info("Initializing HTML platform");
+        HtmlUtil.fixAndroidMath();
 
-        var canvas :Dynamic = null;
+#if html
+        // If running in a plain web browser, look up the canvas from the embedder
+        var canvas :CanvasElement = null;
         try {
             // Use the canvas assigned to us by the flambe.js embedder
-            canvas = (untyped Lib.window).flambe.canvas;
+            canvas = (untyped Browser.window).flambe.canvas;
         } catch (error :Dynamic) {
         }
         Assert.that(canvas != null,
             "Could not find a Flambe canvas! Are you embedding with flambe.js?");
+#else
+        // Otherwise create our own
+        var canvas = Browser.document.createCanvasElement();
+        Browser.document.getElementById("content").appendChild(canvas);
+#end
 
         // Allow the canvas to trap keyboard focus
         canvas.setAttribute("tabindex", "0");
         // ...but hide the focus rectangle
         canvas.style.outlineStyle = "none";
+        (untyped canvas.style).webkitTapHighlightColor = "transparent";
 
         // Browser optimization hints
+#if !flambe_transparent
         canvas.setAttribute("moz-opaque", "true");
+#end
         // canvas.style.webkitTransform = "translateZ(0)";
         // canvas.style.backgroundColor = "#000";
 
@@ -68,22 +66,24 @@ class HtmlPlatform
         _mouse = new HtmlMouse(_pointer, canvas);
 
         _renderer = createRenderer(canvas);
-        System.hasGPU._ = true;
 
         mainLoop = new MainLoop();
 
+        // Used by browsers that don't support audio very well
+        musicPlaying = false;
+
         _canvas = canvas;
-        _container = canvas.parentNode;
+        _container = canvas.parentElement;
         _container.style.overflow = "hidden";
         _container.style.position = "relative";
 
         // Prevent double tap zooming on IE10. Maybe this should be in the MSPointer block below,
         // but I have no idea without testing, so apply it always
         // http://msdn.microsoft.com/en-us/library/windows/apps/Hh767313.aspx
-        _container.style.msTouchAction = "none";
+        (untyped _container.style).msTouchAction = "none";
 
         var lastTouchTime = 0;
-        var onMouse = function (event) {
+        var onMouse = function (event :MouseEvent) {
             if (event.timeStamp - lastTouchTime < 1000) {
                 // Ignore if there was too recent a touch event, to filter out mouse events emulated
                 // by mobile browsers: http://www.w3.org/TR/touch-events/#mouse-events
@@ -98,7 +98,7 @@ class HtmlPlatform
                 if (event.target == canvas) {
                     event.preventDefault();
                     _mouse.submitDown(x, y, event.button);
-                    event.target.focus();
+                    canvas.focus();
                 }
 
             case "mousemove":
@@ -108,7 +108,7 @@ class HtmlPlatform
                 _mouse.submitUp(x, y, event.button);
 
             case "mousewheel", "DOMMouseScroll":
-                var velocity = (event.type == "mousewheel") ? event.wheelDelta/40 : -event.detail;
+                var velocity = (event.type == "mousewheel") ? (untyped event).wheelDelta/40 : -event.detail;
                 if (_mouse.submitScroll(x, y, velocity)) {
                     // Only prevent page scrolling if the event was handled
                     event.preventDefault();
@@ -116,17 +116,20 @@ class HtmlPlatform
             }
         };
         // Add listeners on the window object so dragging and releasing outside of the canvas works
-        (untyped window).addEventListener("mousedown", onMouse, false);
-        (untyped window).addEventListener("mousemove", onMouse, false);
-        (untyped window).addEventListener("mouseup", onMouse, false);
+        Browser.window.addEventListener("mousedown", onMouse, false);
+        Browser.window.addEventListener("mousemove", onMouse, false);
+        Browser.window.addEventListener("mouseup", onMouse, false);
 
         // But the wheel listener should only go on the canvas
         canvas.addEventListener("mousewheel", onMouse, false);
         canvas.addEventListener("DOMMouseScroll", onMouse, false); // https://bugzil.la/719320
 
+        // Suppress the context menu so right-click events aren't interfered with
+        canvas.addEventListener("contextmenu", function (event) event.preventDefault(), false);
+
         // Detect touch support. See http://modernizr.github.com/Modernizr/touch.html for more
         // sophisticated detection methods, but this seems to cover all important browsers
-        var standardTouch :Bool = untyped __js__("typeof")(Lib.window.ontouchstart) != "undefined";
+        var standardTouch :Bool = untyped __js__("typeof")(Browser.window.ontouchstart) != "undefined";
 
         // The pointer event handles mouse movement, touch events, and stylus events.
         // We check to see if multiple points are supported indicating true touch support.
@@ -134,17 +137,17 @@ class HtmlPlatform
         var msTouch :Bool = untyped __js__("'msMaxTouchPoints' in window.navigator && (window.navigator.msMaxTouchPoints > 1)");
 
         if (standardTouch || msTouch) {
-            var basicTouch = new BasicTouch(_pointer, msTouch ?
-                untyped __js__("window.navigator.msMaxTouchPoints") : 4);
+            var basicTouch = new BasicTouch(_pointer, standardTouch ?
+                4 : (untyped Browser.navigator).msMaxTouchPoints);
             _touch = basicTouch;
 
             var onTouch = function (event :Dynamic) {
-                var changedTouches :Array<Dynamic> = standardTouch ?  event.changedTouches : [ event ];
+                var changedTouches :Array<Dynamic> = standardTouch ? event.changedTouches : [event];
                 var bounds = event.target.getBoundingClientRect();
                 lastTouchTime = event.timeStamp;
 
                 switch (event.type) {
-                case "touchstart", "MSPointerDown":
+                case "touchstart", "MSPointerDown", "pointerdown":
                     event.preventDefault();
                     if (HtmlUtil.SHOULD_HIDE_MOBILE_BROWSER) {
                         HtmlUtil.hideMobileBrowser();
@@ -156,7 +159,7 @@ class HtmlPlatform
                         basicTouch.submitDown(id, x, y);
                     }
 
-                case "touchmove", "MSPointerMove":
+                case "touchmove", "MSPointerMove", "pointermove":
                     event.preventDefault();
                     for (touch in changedTouches) {
                         var x = getX(touch, bounds);
@@ -165,7 +168,7 @@ class HtmlPlatform
                         basicTouch.submitMove(id, x, y);
                     }
 
-                case "touchend", "touchcancel", "MSPointerUp":
+                case "touchend", "touchcancel", "MSPointerUp", "pointerup":
                     for (touch in changedTouches) {
                         var x = getX(touch, bounds);
                         var y = getY(touch, bounds);
@@ -191,21 +194,21 @@ class HtmlPlatform
         }
 
         // Handle uncaught errors
-        var oldErrorHandler = (untyped Lib.window).onerror;
-        (untyped Lib.window).onerror = function (message, url, line) {
+        var oldErrorHandler = (untyped Browser.window).onerror;
+        (untyped Browser.window).onerror = function (message :String, url :String, line :Int) {
             System.uncaughtError.emit(message);
             return (oldErrorHandler != null) ? oldErrorHandler(message, url, line) : false;
         };
 
         // Handle visibility changes if the browser supports them
         // http://www.w3.org/TR/page-visibility/
-        var hiddenApi = HtmlUtil.loadExtension("hidden", Lib.document);
+        var hiddenApi = HtmlUtil.loadExtension("hidden", Browser.document);
         if (hiddenApi.value != null) {
-            var onVisibilityChanged = function () {
-                System.hidden._ = Reflect.field(Lib.document, hiddenApi.field);
+            var onVisibilityChanged = function (_) {
+                System.hidden._ = Reflect.field(Browser.document, hiddenApi.field);
             };
-            onVisibilityChanged(); // Update now
-            (untyped Lib.document).addEventListener(hiddenApi.prefix + "visibilitychange",
+            onVisibilityChanged(null); // Update now
+            Browser.document.addEventListener(hiddenApi.prefix + "visibilitychange",
                 onVisibilityChanged, false);
         } else {
             // Adds some lock screen support for iOS, possibly other devices that don't support the
@@ -213,13 +216,12 @@ class HtmlPlatform
             var onPageTransitionChange = function (event) {
                 System.hidden._ = (event.type == "pagehide");
             };
-            (untyped Lib.window).addEventListener("pageshow", onPageTransitionChange, false);
-            (untyped Lib.window).addEventListener("pagehide", onPageTransitionChange, false);
+            Browser.window.addEventListener("pageshow", onPageTransitionChange, false);
+            Browser.window.addEventListener("pagehide", onPageTransitionChange, false);
         }
 
         // Skip the next frame when coming back from being hidden
         System.hidden.changed.connect(function (hidden,_) {
-            trace("Hidden changed: " + hidden);
             if (!hidden) {
                 _skipFrame = true;
             }
@@ -234,7 +236,7 @@ class HtmlPlatform
         if (requestAnimationFrame != null) {
             // Use the high resolution, monotonic timer if available
             // http://www.w3.org/TR/hr-time/
-            var performance :{ now :Void -> Float } = untyped Lib.window.performance;
+            var performance :Performance = Browser.window.performance;
             var hasPerfNow = (performance != null) && HtmlUtil.polyfill("now", performance);
 
             if (hasPerfNow) {
@@ -253,10 +255,18 @@ class HtmlPlatform
 
         } else {
             Log.warn("No requestAnimationFrame support, falling back to setInterval");
-            (untyped Lib.window).setInterval(function () {
+            Browser.window.setInterval(function () {
                 update(HtmlUtil.now());
-            }, 1000/60);
+            }, 16); // ~60 FPS
         }
+
+#if debug
+        new DebugLogic(this);
+#if html
+        _catapult = HtmlCatapultClient.canUse() ? new HtmlCatapultClient() : null;
+#end
+#end
+        Log.info("Initialized HTML platform", ["renderer", _renderer.type]);
     }
 
     public function loadAssetPack (manifest :Manifest) :Promise<AssetPack>
@@ -264,21 +274,17 @@ class HtmlPlatform
         return new HtmlAssetPackLoader(this, manifest).promise;
     }
 
-    public function getStage () :Stage
+    public function getStage () :StageSystem
     {
         return _stage;
     }
 
-    public function getStorage () :Storage
+    public function getStorage () :StorageSystem
     {
         if (_storage == null) {
-            var localStorage = null;
-            try {
-                localStorage = (untyped Lib.window).localStorage;
-            } catch (error :Dynamic) {
-                // Browsers may throw an error on accessing localStorage:
-                // http://dev.w3.org/html5/webstorage/#dom-localstorage
-            }
+            // Safely access localStorage (browsers may throw an error on direct access)
+            // http://dev.w3.org/html5/webstorage/#dom-localstorage
+            var localStorage = Browser.getLocalStorage();
             if (localStorage != null) {
                 _storage = new HtmlStorage(localStorage);
             } else {
@@ -292,11 +298,11 @@ class HtmlPlatform
     public function getLocale () :String
     {
         // https://developer.mozilla.org/en-US/docs/DOM/window.navigator.language
-        var locale = (untyped Lib.window).navigator.language;
+        var locale = Browser.navigator.language;
         if (locale == null) {
             // IE uses the non-standard userLanguage (or browserLanguage or systemLanguage, but
             // userLanguage seems to match String's locale-aware methods)
-            locale = (untyped Lib.window).navigator.userLanguage;
+            locale = (untyped Browser.navigator).userLanguage;
         }
         return locale;
     }
@@ -316,6 +322,11 @@ class HtmlPlatform
         return HtmlUtil.now() / 1000;
     }
 
+    public function getCatapultClient ()
+    {
+        return _catapult;
+    }
+
     private function update (now :Float)
     {
         var dt = (now-_lastUpdate) / 1000;
@@ -333,26 +344,26 @@ class HtmlPlatform
         mainLoop.render(_renderer);
     }
 
-    public function getPointer () :Pointer
+    public function getPointer () :PointerSystem
     {
         return _pointer;
     }
 
-    public function getMouse () :Mouse
+    public function getMouse () :MouseSystem
     {
         return _mouse;
     }
 
-    public function getTouch () :Touch
+    public function getTouch () :TouchSystem
     {
         return _touch;
     }
 
-    public function getKeyboard () :Keyboard
+    public function getKeyboard () :KeyboardSystem
     {
         if (_keyboard == null) {
             _keyboard = new BasicKeyboard();
-            var onKey = function (event) {
+            var onKey = function (event :KeyboardEvent) {
                 switch (event.type) {
                 case "keydown":
                     if (_keyboard.submitDown(event.keyCode)) {
@@ -368,7 +379,7 @@ class HtmlPlatform
         return _keyboard;
     }
 
-    public function getWeb () :Web
+    public function getWeb () :WebSystem
     {
         if (_web == null) {
             _web = new HtmlWeb(_container);
@@ -376,7 +387,7 @@ class HtmlPlatform
         return _web;
     }
 
-    public function getExternal () :External
+    public function getExternal () :ExternalSystem
     {
         if (_external == null) {
             _external = new HtmlExternal();
@@ -384,7 +395,7 @@ class HtmlPlatform
         return _external;
     }
 
-    public function getMotion () :Motion
+    public function getMotion () :MotionSystem
     {
         if (_motion == null) {
             _motion = new HtmlMotion();
@@ -392,52 +403,86 @@ class HtmlPlatform
         return _motion;
     }
 
-    public function getRenderer () :Renderer
+    public function getRenderer () :InternalRenderer<Dynamic>
     {
         return _renderer;
     }
 
     private function getX (event :Dynamic, bounds :Dynamic) :Float
     {
-        return _stage.scaleFactor*(event.clientX - bounds.left);
+        return (event.clientX - bounds.left)*_stage.width/bounds.width;
     }
 
     private function getY (event :Dynamic, bounds :Dynamic) :Float
     {
-        return _stage.scaleFactor*(event.clientY - bounds.top);
+        return (event.clientY - bounds.top)*_stage.height/bounds.height;
     }
 
-    private function createRenderer (canvas :Dynamic) :Renderer
+    private function createRenderer (canvas :CanvasElement) :InternalRenderer<Dynamic>
     {
-#if flambe_enable_webgl
-        for (name in ["webgl", "experimental-webgl"]) {
-            var gl = canvas.getContext(name, {alpha: false, depth: false});
+#if !flambe_disable_webgl
+
+#if firefox
+        // WebGL is buggy in Firefox OS 1.1, so blacklist it there
+        // https://developer.mozilla.org/en-US/docs/Gecko_user_agent_string_reference#Firefox_OS
+        var majorVersion = ~/\bFirefox\/(\d+)/;
+        if (!majorVersion.match(Browser.navigator.userAgent) || Std.parseInt(majorVersion.matched(1)) >= 26)
+#end
+        try {
+            var gl = canvas.getContextWebGL(cast {
+#if !flambe_transparent
+                alpha: false,
+#end
+                depth: false,
+                // http://blog.tojicode.com/2013/12/failifmajorperformancecaveat-with-great.html
+                failIfMajorPerformanceCaveat: true,
+            });
             if (gl != null) {
+#if !flambe_disable_canvas
+                // TODO(bruno): Remove this check once failIfMajorPerformanceCaveat becomes
+                // prevalent
+                if (HtmlUtil.detectSlowDriver(gl)) {
+                    Log.warn("Detected a slow WebGL driver, falling back to canvas");
+                } else
+#end
                 return new WebGLRenderer(_stage, gl);
             }
+        } catch (_ :Dynamic) {
+            // Getting the WebGL context blows up on some (headless?) systems
         }
-        Log.info("WebGL not available, falling back to canvas");
 #end
+
+#if !flambe_disable_canvas
+        // No WebGL, fall back to canvas
         return new CanvasRenderer(canvas);
+#end
+
+#if (flambe_disable_webgl && flambe_disable_canvas)
+#error "Build with either flambe_disable_webgl or flambe_disable_canvas, not both!"
+#end
+        Log.error("No renderer available!");
+        return null;
     }
 
     // Statically initialized subsystems
     private var _mouse :HtmlMouse;
     private var _pointer :BasicPointer;
-    private var _renderer :Renderer;
+    private var _renderer :InternalRenderer<Dynamic>;
     private var _stage :HtmlStage;
-    private var _touch :Touch;
+    private var _touch :TouchSystem;
 
     // Lazily initialized subsystems
-    private var _external :External;
+    private var _external :ExternalSystem;
     private var _keyboard :BasicKeyboard;
-    private var _motion :Motion;
-    private var _storage :Storage;
-    private var _web :Web;
+    private var _motion :MotionSystem;
+    private var _storage :StorageSystem;
+    private var _web :WebSystem;
 
-    private var _canvas :Dynamic;
-    private var _container :Dynamic;
+    private var _canvas :CanvasElement;
+    private var _container :Element;
 
     private var _lastUpdate :Float;
     private var _skipFrame :Bool;
+
+    private var _catapult :HtmlCatapultClient;
 }

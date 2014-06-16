@@ -31,7 +31,7 @@ class Arrays
     }
 
     /** Allocate an array of a predetermined length. */
-    inline public static function create<A> (length :Int) :Array<A>
+    @:noUsing inline public static function create<A> (length :Int) :Array<A>
     {
 #if (flash || js)
         // This trick only works in Flash and JS
@@ -42,13 +42,31 @@ class Arrays
     }
 
     /** Resizes an array in-place. */
-    inline public static function resize (arr :Array<Dynamic>, length :Int)
+    inline public static function resize<A> (arr :Array<A>, length :Int)
     {
 #if (flash || js)
         // This trick only works in Flash and JS
         (untyped arr).length = length;
 #else
         #error "Arrays.resize unimplemented on this target"
+#end
+    }
+
+    inline public static function indexOf<A> (arr :Array<A>, element :A, ?fromIndex :Int) :Int
+    {
+#if (flash || js)
+        return (untyped arr).indexOf(element, fromIndex);
+#else
+        #error "Arrays.indexOf unimplemented on this target"
+#end
+    }
+
+    inline public static function lastIndexOf<A> (arr :Array<A>, element :A, ?fromIndex :Int) :Int
+    {
+#if (flash || js)
+        return (untyped arr).lastIndexOf(element, fromIndex);
+#else
+        #error "Arrays.lastIndexOf unimplemented on this target"
 #end
     }
 }

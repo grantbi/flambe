@@ -5,17 +5,17 @@
 package flambe.platform;
 
 import flambe.input.Key;
-import flambe.input.Keyboard;
 import flambe.input.KeyboardEvent;
+import flambe.subsystem.KeyboardSystem;
 import flambe.util.Signal0;
 import flambe.util.Signal1;
 
 using flambe.platform.KeyCodes;
 
 class DummyKeyboard
-    implements Keyboard
+    implements KeyboardSystem
 {
-    public var supported (get_supported, null) :Bool;
+    public var supported (get, null) :Bool;
 
     public var down (default, null) :Signal1<KeyboardEvent>;
     public var up (default, null) :Signal1<KeyboardEvent>;

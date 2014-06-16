@@ -33,7 +33,7 @@ class SignalBase
         return conn;
     }
 
-    /** @private */ public function _internal_disconnect (conn :SignalConnection)
+    @:allow(flambe) function disconnect (conn :SignalConnection)
     {
         if (dispatching()) {
             defer(function () {
@@ -42,48 +42,6 @@ class SignalBase
         } else {
             listRemove(conn);
         }
-    }
-
-    private function emit0 ()
-    {
-        var head = willEmit();
-        var p = head;
-        while (p != null) {
-            p._internal_listener();
-            if (!p.stayInList) {
-                p.dispose();
-            }
-            p = p._internal_next;
-        }
-        didEmit(head);
-    }
-
-    private function emit1 (arg1 :Dynamic)
-    {
-        var head = willEmit();
-        var p = head;
-        while (p != null) {
-            p._internal_listener(arg1);
-            if (!p.stayInList) {
-                p.dispose();
-            }
-            p = p._internal_next;
-        }
-        didEmit(head);
-    }
-
-    private function emit2 (arg1 :Dynamic, arg2 :Dynamic)
-    {
-        var head = willEmit();
-        var p = head;
-        while (p != null) {
-            p._internal_listener(arg1, arg2);
-            if (!p.stayInList) {
-                p.dispose();
-            }
-            p = p._internal_next;
-        }
-        didEmit(head);
     }
 
     private function defer (fn :Void->Void)
@@ -104,7 +62,9 @@ class SignalBase
 
     private function willEmit () :SignalConnection
     {
-        Assert.that(!dispatching(), "Cannot emit while already emitting!");
+        // Should never happen, since the public emit methods will defer, but just in case...
+        Assert.that(!dispatching());
+
         var snapshot = _head;
         _head = DISPATCHING_SENTINEL;
         return snapshot;
@@ -113,9 +73,12 @@ class SignalBase
     private function didEmit (head :SignalConnection)
     {
         _head = head;
-        while (_deferredTasks != null) {
-            _deferredTasks.fn();
-            _deferredTasks = _deferredTasks.next;
+
+        var snapshot = _deferredTasks;
+        _deferredTasks = null;
+        while (snapshot != null) {
+            snapshot.fn();
+            snapshot = snapshot.next;
         }
     }
 
@@ -123,17 +86,17 @@ class SignalBase
     {
         if (prioritize) {
             // Prepend it to the beginning of the list
-            conn._internal_next = _head;
+            conn._next = _head;
             _head = conn;
         } else {
             // Append it to the end of the list
             var tail = null, p = _head;
             while (p != null) {
                 tail = p;
-                p = p._internal_next;
+                p = p._next;
             }
             if (tail != null) {
-                tail._internal_next = conn;
+                tail._next = conn;
             } else {
                 _head = conn;
             }
@@ -146,16 +109,16 @@ class SignalBase
         while (p != null) {
             if (p == conn) {
                 // Splice out p
-                var next = p._internal_next;
+                var next = p._next;
                 if (prev == null) {
                     _head = next;
                 } else {
-                    prev._internal_next = next;
+                    prev._next = next;
                 }
                 return;
             }
             prev = p;
-            p = p._internal_next;
+            p = p._next;
         }
     }
 

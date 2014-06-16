@@ -6,21 +6,23 @@ package flambe.platform;
 
 import flambe.input.Acceleration;
 import flambe.input.Attitude;
-import flambe.input.Motion;
+import flambe.subsystem.MotionSystem;
 import flambe.util.Signal1;
 
 class DummyMotion
-    implements Motion
+    implements MotionSystem
 {
-    public var accelerationSupported (get_accelerationSupported, null) :Bool;
+    public var accelerationSupported (get, null) :Bool;
     public var acceleration (default, null) :Signal1<Acceleration>;
+    public var accelerationIncludingGravity (default, null) :Signal1<Acceleration>;
 
-    public var attitudeSupported (get_attitudeSupported, null) :Bool;
+    public var attitudeSupported (get, null) :Bool;
     public var attitude (default, null) :Signal1<Attitude>;
 
     public function new ()
     {
         acceleration = new Signal1();
+        accelerationIncludingGravity = new Signal1();
         attitude = new Signal1();
     }
 

@@ -5,6 +5,7 @@
 package flambe.display;
 
 import flambe.animation.AnimatedFloat;
+import flambe.display.EmitterMold;
 import flambe.math.FMath;
 
 using flambe.util.Arrays;
@@ -17,7 +18,18 @@ class EmitterSprite extends Sprite
     /** The particle texture, must be square. */
     public var texture :Texture;
 
-    public var maxParticles (get_maxParticles, set_maxParticles) :Int;
+    /** The current number of particles being shown. */
+    public var numParticles (default, null) :Int = 0;
+
+    public var maxParticles (get, set) :Int;
+
+    public var type :EmitterType;
+
+    /** How long the emitter should remain enabled, or <= 0 to never expire. */
+    public var duration :Float;
+
+    /** Whether new particles are being actively emitted. */
+    public var enabled :Bool = true;
 
     public var emitX (default, null) :AnimatedFloat;
     public var emitXVariance (default, null) :AnimatedFloat;
@@ -34,25 +46,19 @@ class EmitterSprite extends Sprite
     public var angle (default, null) :AnimatedFloat;
     public var angleVariance (default, null) :AnimatedFloat;
 
-    /** How long the emitter should remain enabled, or <= 0 to never expire. */
-    public var duration :Float;
-
-    /** Whether new particles are being actively emitted. */
-    public var enabled :Bool = true;
-
     public var gravityX (default, null) :AnimatedFloat;
     public var gravityY (default, null) :AnimatedFloat;
 
-    // TODO(bruno): Implement!
-    // public var maxRadius (default, null) :AnimatedFloat;
-    // public var maxRadiusVariance (default, null) :AnimatedFloat;
+    public var maxRadius (default, null) :AnimatedFloat;
+    public var maxRadiusVariance (default, null) :AnimatedFloat;
+
+    public var minRadius (default, null) :AnimatedFloat;
 
     public var lifespanVariance (default, null) :AnimatedFloat;
     public var lifespan (default, null) :AnimatedFloat;
 
-    // TODO(bruno): Implement!
-    // public var rotatePerSecond (default, null) :AnimatedFloat;
-    // public var rotatePerSecondVariance (default, null) :AnimatedFloat;
+    public var rotatePerSecond (default, null) :AnimatedFloat;
+    public var rotatePerSecondVariance (default, null) :AnimatedFloat;
 
     public var rotationStart (default, null) :AnimatedFloat;
     public var rotationStartVariance (default, null) :AnimatedFloat;
@@ -81,6 +87,7 @@ class EmitterSprite extends Sprite
 
         texture = mold.texture;
         blendMode = mold.blendMode;
+        type = mold.type;
 
         alphaEnd = new AnimatedFloat(mold.alphaEnd);
         alphaEndVariance = new AnimatedFloat(mold.alphaEndVariance);
@@ -93,10 +100,15 @@ class EmitterSprite extends Sprite
         emitYVariance = new AnimatedFloat(mold.emitYVariance);
         gravityX = new AnimatedFloat(mold.gravityX);
         gravityY = new AnimatedFloat(mold.gravityY);
+        maxRadius = new AnimatedFloat(mold.maxRadius);
+        maxRadiusVariance = new AnimatedFloat(mold.maxRadiusVariance);
+        minRadius = new AnimatedFloat(mold.minRadius);
         lifespan = new AnimatedFloat(mold.lifespan);
         lifespanVariance = new AnimatedFloat(mold.lifespanVariance);
         radialAccel = new AnimatedFloat(mold.radialAccel);
         radialAccelVariance = new AnimatedFloat(mold.radialAccelVariance);
+        rotatePerSecond = new AnimatedFloat(mold.rotatePerSecond);
+        rotatePerSecondVariance = new AnimatedFloat(mold.rotatePerSecondVariance);
         rotationEnd = new AnimatedFloat(mold.rotationEnd);
         rotationEndVariance = new AnimatedFloat(mold.rotationEndVariance);
         rotationStart = new AnimatedFloat(mold.rotationStart);
@@ -145,12 +157,13 @@ class EmitterSprite extends Sprite
         gravityY.update(dt);
         lifespan.update(dt);
         lifespanVariance.update(dt);
-        // maxRadius.update(dt);
-        // maxRadiusVariance.update(dt);
+        maxRadius.update(dt);
+        maxRadiusVariance.update(dt);
+        minRadius.update(dt);
         radialAccel.update(dt);
         radialAccelVariance.update(dt);
-        // rotatePerSecond.update(dt);
-        // rotatePerSecondVariance.update(dt);
+        rotatePerSecond.update(dt);
+        rotatePerSecondVariance.update(dt);
         rotationEnd.update(dt);
         rotationEndVariance.update(dt);
         rotationStart.update(dt);
@@ -165,36 +178,51 @@ class EmitterSprite extends Sprite
         tangentialAccelVariance.update(dt);
 
         // Update existing particles
+        var gravityType = (type == Gravity);
         var ii = 0;
-        while (ii < _numParticles) {
+        while (ii < numParticles) {
             var particle = _particles[ii];
             if (particle.life > dt) {
-                particle.x += particle.velX * dt;
-                particle.y += particle.velY * dt;
+                if (gravityType) {
+                    particle.x += particle.velX * dt;
+                    particle.y += particle.velY * dt;
 
-                var accelX = gravityX._;
-                var accelY = -gravityY._;
+                    var accelX = gravityX._;
+                    var accelY = -gravityY._;
 
-                if (particle.radialAccel != 0 || particle.tangentialAccel != 0) {
-                    var dx = particle.x - particle.emitX;
-                    var dy = particle.y - particle.emitY;
-                    var distance = Math.sqrt(dx*dx + dy*dy);
+                    if (particle.radialAccel != 0 || particle.tangentialAccel != 0) {
+                        var dx = particle.x - particle.emitX;
+                        var dy = particle.y - particle.emitY;
+                        var distance = Math.sqrt(dx*dx + dy*dy);
 
-                    // Apply radial force
-                    var radialX = dx / distance;
-                    var radialY = dy / distance;
-                    accelX += radialX * particle.radialAccel;
-                    accelY += radialY * particle.radialAccel;
+                        // Apply radial force
+                        var radialX = dx / distance;
+                        var radialY = dy / distance;
+                        accelX += radialX * particle.radialAccel;
+                        accelY += radialY * particle.radialAccel;
 
-                    // Apply tangential force
-                    var tangentialX = -radialY;
-                    var tangentialY = radialX;
-                    accelX += tangentialX * particle.tangentialAccel;
-                    accelY += tangentialY * particle.tangentialAccel;
+                        // Apply tangential force
+                        var tangentialX = -radialY;
+                        var tangentialY = radialX;
+                        accelX += tangentialX * particle.tangentialAccel;
+                        accelY += tangentialY * particle.tangentialAccel;
+                    }
+
+                    particle.velX += accelX * dt;
+                    particle.velY += accelY * dt;
+
+                } else {
+                    particle.radialRotation += particle.velRadialRotation * dt;
+                    particle.radialRadius += particle.velRadialRadius * dt;
+
+                    var radius = particle.radialRadius;
+                    particle.x = emitX._ - Math.cos(particle.radialRotation) * radius;
+                    particle.y = emitY._ - Math.sin(particle.radialRotation) * radius;
+
+                    if (radius < minRadius._) {
+                        particle.life = 0; // Kill it
+                    }
                 }
-
-                particle.velX += accelX * dt;
-                particle.velY += accelY * dt;
 
                 particle.scale += particle.velScale * dt;
                 particle.rotation += particle.velRotation * dt;
@@ -206,10 +234,10 @@ class EmitterSprite extends Sprite
             } else {
                 // Kill it, and swap it with the last living particle, so that alive particles are
                 // packed to the front of the pool
-                --_numParticles;
-                if (ii != _numParticles) {
-                    _particles[ii] = _particles[_numParticles];
-                    _particles[_numParticles] = particle;
+                --numParticles;
+                if (ii != numParticles) {
+                    _particles[ii] = _particles[numParticles];
+                    _particles[numParticles] = particle;
                 }
             }
         }
@@ -230,10 +258,10 @@ class EmitterSprite extends Sprite
         var emitDelay = lifespan._ / _particles.length;
         _emitElapsed += dt;
         while (_emitElapsed >= emitDelay) {
-            if (_numParticles < _particles.length) {
-                var particle = _particles[_numParticles];
+            if (numParticles < _particles.length) {
+                var particle = _particles[numParticles];
                 if (initParticle(particle)) {
-                    ++_numParticles;
+                    ++numParticles;
                 }
             }
             _emitElapsed -= emitDelay;
@@ -245,7 +273,7 @@ class EmitterSprite extends Sprite
         // Assumes that the texture is always square
         var offset = -texture.width/2;
 
-        var ii = 0, ll = _numParticles;
+        var ii = 0, ll = numParticles;
         while (ii < ll) {
             var particle = _particles[ii];
             g.save();
@@ -259,7 +287,7 @@ class EmitterSprite extends Sprite
             if (particle.scale != 1) {
                 g.scale(particle.scale, particle.scale);
             }
-            g.drawImage(texture, offset, offset);
+            g.drawTexture(texture, offset, offset);
             g.restore();
 
             ++ii;
@@ -277,9 +305,6 @@ class EmitterSprite extends Sprite
         particle.emitX = emitX._;
         particle.emitY = emitY._;
 
-        particle.x = random(emitX._, emitXVariance._);
-        particle.y = random(emitY._, emitYVariance._);
-
         var angle = -FMath.toRadians(random(angle._, angleVariance._));
         var speed = random(speed._, speedVariance._);
         particle.velX = speed * Math.cos(angle);
@@ -287,6 +312,21 @@ class EmitterSprite extends Sprite
 
         particle.radialAccel = random(radialAccel._, radialAccelVariance._);
         particle.tangentialAccel = random(tangentialAccel._, tangentialAccelVariance._);
+
+        particle.radialRadius = random(maxRadius._, maxRadiusVariance._);
+        particle.velRadialRadius = -particle.radialRadius / particle.life;
+        particle.radialRotation = angle;
+        particle.velRadialRotation = FMath.toRadians(random(rotatePerSecond._, rotatePerSecondVariance._));
+
+        if (type == Gravity) {
+            particle.x = random(emitX._, emitXVariance._);
+            particle.y = random(emitY._, emitYVariance._);
+
+        } else { // type == Radial
+            var radius = particle.radialRadius;
+            particle.x = emitX._ - Math.cos(particle.radialRotation) * radius;
+            particle.y = emitY._ - Math.sin(particle.radialRotation) * radius;
+        }
 
         // Assumes that the texture is always square
         var width = texture.width;
@@ -323,8 +363,8 @@ class EmitterSprite extends Sprite
             ++oldLength;
         }
 
-        if (_numParticles > maxParticles) {
-            _numParticles = maxParticles;
+        if (numParticles > maxParticles) {
+            numParticles = maxParticles;
         }
 
         return maxParticles;
@@ -340,9 +380,6 @@ class EmitterSprite extends Sprite
 
     // The particle pool
     private var _particles :Array<Particle>;
-
-    // Number of currently alive particles
-    private var _numParticles :Int = 0;
 
     // Time passed since the last emission
     private var _emitElapsed :Float = 0;
@@ -361,6 +398,12 @@ private class Particle
 
     public var y :Float = 0;
     public var velY :Float = 0;
+
+    public var radialRadius :Float = 0;
+    public var velRadialRadius :Float = 0;
+
+    public var radialRotation :Float = 0;
+    public var velRadialRotation :Float = 0;
 
     public var radialAccel :Float = 0;
     public var tangentialAccel :Float = 0;

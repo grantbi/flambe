@@ -51,8 +51,8 @@ class Strings
      */
     public static function joinPath (base :String, relative :String) :String
     {
-        if (base.fastCodeAt(base.length-1) != "/".code) {
-            base += "/"; // Ensure it ends with a trailing slash
+        if (base.length > 0 && base.fastCodeAt(base.length-1) != "/".code) {
+            base += "/"; // Ensure base ends with a trailing slash
         }
         return base + relative;
     }
@@ -70,8 +70,11 @@ class Strings
 
     /**
      * Substitute all "{n}" tokens with the corresponding values.
-     * Example: <pre>substitute("{1} sat on a {0}", ["wall", "Humpty Dumpty"])</pre> returns
-     * <pre>"Humpty Dumpty sat on a wall"</pre>.
+     *
+     * ```haxe
+     * "{1} sat on a {0}".substitute(["wall", "Humpty Dumpty"]);
+     * // returns "Humpty Dumpty sat on a wall"
+     * ```
      */
     public static function substitute (str :String, values :Array<Dynamic>) :String
     {
@@ -85,8 +88,12 @@ class Strings
 
     /**
      * Format a message with named parameters into a standard format for logging and errors.
-     * Example: <pre>withFields("Wobbles were frobulated", ["count", 5, "silly", true])</pre> returns
-     * <pre>"Wobbles were frobulated [count=5, silly=true]"</pre>.
+     *
+     * ```haxe
+     * "Wobbles were frobulated".withFields(["count", 5, "silly", true]);
+     * // returns "Wobbles were frobulated [count=5, silly=true]"
+     * ```
+     *
      * @param fields The field names and values to be formatted. Must have an even length.
      */
     public static function withFields (message :String, fields :Array<Dynamic>) :String

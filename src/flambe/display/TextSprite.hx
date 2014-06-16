@@ -15,10 +15,11 @@ using flambe.util.BitSets;
  */
 class TextSprite extends Sprite
 {
-    public var text (get_text, set_text) :String;
+    /** The text being displayed. Can contain contain newline characters (\n) for multiline text. */
+    public var text (get, set) :String;
 
     /** The font used to display the text. */
-    public var font (get_font, set_font) :Font;
+    public var font (get, set) :Font;
 
     /**
      * The maximum available width of this text before word wrapping to a new line. Defaults to 0
@@ -27,9 +28,21 @@ class TextSprite extends Sprite
     public var wrapWidth (default, null) :AnimatedFloat;
 
     /**
+     * Additional horizontal space to apply between letters, in pixels. Defaults to 0. Positive
+     * values make text look "looser", negative values look "tighter".
+     */
+    public var letterSpacing (default, null) :AnimatedFloat;
+
+    /**
+     * Additional vertical space to apply between lines, in pixels. Defaults to 0. Positive values
+     * make lines look "looser", negative values look "tighter".
+     */
+    public var lineSpacing (default, null) :AnimatedFloat;
+
+    /**
      * The horizontal text alignment, for multiline text. Left by default.
      */
-    public var align (get_align, set_align) :TextAlign;
+    public var align (get, set) :TextAlign;
 
     public function new (font :Font, ?text :String = "")
     {
@@ -39,9 +52,12 @@ class TextSprite extends Sprite
         _align = Left;
         _flags = _flags.add(Sprite.TEXTSPRITE_DIRTY);
 
-        wrapWidth = new AnimatedFloat(0, function (_,_) {
+        var dirtyText = function (_,_) {
             _flags = _flags.add(Sprite.TEXTSPRITE_DIRTY);
-        });
+        };
+        wrapWidth = new AnimatedFloat(0, dirtyText);
+        letterSpacing = new AnimatedFloat(0, dirtyText);
+        lineSpacing = new AnimatedFloat(0, dirtyText);
     }
 
     override public function draw (g :Graphics)
@@ -54,7 +70,7 @@ class TextSprite extends Sprite
         g.fillRect(0x00ff00, _layout.bounds.x, _layout.bounds.y, _layout.bounds.width, _layout.bounds.height);
 #end
 
-        _layout.draw(g, align);
+        _layout.draw(g);
     }
 
     override public function getNaturalWidth () :Float
@@ -66,13 +82,55 @@ class TextSprite extends Sprite
     override public function getNaturalHeight () :Float
     {
         updateLayout();
-        return _layout.lines * _font.size;
+        var paddedHeight = _layout.lines * (_font.lineHeight+lineSpacing._);
+        var boundsHeight = _layout.bounds.height;
+        return FMath.max(paddedHeight, boundsHeight);
     }
 
     override public function containsLocal (localX :Float, localY :Float) :Bool
     {
         updateLayout();
         return _layout.bounds.contains(localX, localY);
+    }
+
+    /**
+     * Chainable convenience method to set the wrap width.
+     * @returns This instance, for chaining.
+     */
+    public function setWrapWidth (wrapWidth :Float) :TextSprite
+    {
+        this.wrapWidth._ = wrapWidth;
+        return this;
+    }
+
+    /**
+     * Chainable convenience method to set the letter spacing.
+     * @returns This instance, for chaining.
+     */
+    public function setLetterSpacing (letterSpacing :Float) :TextSprite
+    {
+        this.letterSpacing._ = letterSpacing;
+        return this;
+    }
+
+    /**
+     * Chainable convenience method to set the line spacing.
+     * @returns This instance, for chaining.
+     */
+    public function setLineSpacing (lineSpacing :Float) :TextSprite
+    {
+        this.lineSpacing._ = lineSpacing;
+        return this;
+    }
+
+    /**
+     * Chainable convenience method to set the text alignment.
+     * @returns This instance, for chaining.
+     */
+    public function setAlign (align :TextAlign) :TextSprite
+    {
+        this.align = align;
+        return this;
     }
 
     inline private function get_text () :String
@@ -82,8 +140,10 @@ class TextSprite extends Sprite
 
     private function set_text (text :String) :String
     {
-        _text = text;
-        _flags = _flags.add(Sprite.TEXTSPRITE_DIRTY);
+        if (text != _text) {
+            _text = text;
+            _flags = _flags.add(Sprite.TEXTSPRITE_DIRTY);
+        }
         return text;
     }
 
@@ -94,8 +154,10 @@ class TextSprite extends Sprite
 
     private function set_font (font :Font) :Font
     {
-        _font = font;
-        _flags = _flags.add(Sprite.TEXTSPRITE_DIRTY);
+        if (font != _font) {
+            _font = font;
+            _flags = _flags.add(Sprite.TEXTSPRITE_DIRTY);
+        }
         return font;
     }
 
@@ -106,16 +168,27 @@ class TextSprite extends Sprite
 
     private function set_align (align :TextAlign) :TextAlign
     {
-        _align = align;
-        _flags = _flags.add(Sprite.TEXTSPRITE_DIRTY);
+        if (align != _align) {
+            _align = align;
+            _flags = _flags.add(Sprite.TEXTSPRITE_DIRTY);
+        }
         return align;
     }
 
     private function updateLayout ()
     {
+#if debug
+        var reloadCount = _font.checkReload();
+        if (reloadCount != _lastReloadCount) {
+            _lastReloadCount = reloadCount;
+            _flags = _flags.add(Sprite.TEXTSPRITE_DIRTY);
+        }
+#end
+
+        // Recreate the layout if necessary
         if (_flags.contains(Sprite.TEXTSPRITE_DIRTY)) {
             _flags = _flags.remove(Sprite.TEXTSPRITE_DIRTY);
-            _layout = font.layoutText(_text, _align, wrapWidth._);
+            _layout = font.layoutText(_text, _align, wrapWidth._, letterSpacing._, lineSpacing._);
         }
     }
 
@@ -123,6 +196,8 @@ class TextSprite extends Sprite
     {
         super.onUpdate(dt);
         wrapWidth.update(dt);
+        letterSpacing.update(dt);
+        lineSpacing.update(dt);
     }
 
     private var _font :Font;
@@ -130,4 +205,8 @@ class TextSprite extends Sprite
     private var _align :TextAlign;
 
     private var _layout :TextLayout = null;
+
+#if debug
+    private var _lastReloadCount :Int = -1;
+#end
 }

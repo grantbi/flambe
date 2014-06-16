@@ -5,8 +5,10 @@
 package flambe.display;
 
 import flambe.asset.AssetPack;
+import flambe.asset.File;
 import flambe.math.FMath;
 import flambe.math.Rectangle;
+import flambe.util.Value;
 
 using StringTools;
 using flambe.util.Strings;
@@ -23,9 +25,14 @@ class Font
     public var name (default, null) :String;
 
     /**
-     * The vertical size of this font, in pixels.
+     * The size of this font, in pixels.
      */
     public var size (default, null) :Float;
+
+    /**
+     * The vertical distance between each line of text in this font, in pixels.
+     */
+    public var lineHeight (default, null) :Float;
 
     /**
      * Parses a font using files in an asset pack.
@@ -34,80 +41,25 @@ class Font
     public function new (pack :AssetPack, name :String)
     {
         this.name = name;
-        _glyphs = new IntHash();
-        _glyphs.set(NEWLINE.charCode, NEWLINE);
+        _pack = pack;
+        _file = pack.getFile(name+".fnt");
 
-        var parser = new ConfigParser(pack.getFile(name + ".fnt"));
-        var pages = new IntHash<Texture>();
+        reload();
+#if debug
+        _lastReloadCount = _file.reloadCount._;
+#end
+    }
 
-        // The basename of the font's path, where we'll find the textures
-        var idx = name.lastIndexOf("/");
-        var basePath = (idx >= 0) ? name.substr(0, idx+1) : "";
-
-        for (keyword in parser.keywords()) {
-            switch (keyword) {
-            case "info":
-                for (pair in parser.pairs()) {
-                    switch (pair.key) {
-                    case "size":
-                        size = pair.getInt();
-                    }
-                }
-
-            case "page":
-                var pageId :Int = 0;
-                var file :String = null;
-                for (pair in parser.pairs()) {
-                    switch (pair.key) {
-                    case "id":
-                        pageId = pair.getInt();
-                    case "file":
-                        file = pair.getString();
-                    }
-                }
-                pages.set(pageId, pack.getTexture(basePath + file.removeFileExtension()));
-
-            case "char":
-                var glyph = null;
-                for (pair in parser.pairs()) {
-                    switch (pair.key) {
-                    case "id":
-                        glyph = new Glyph(pair.getInt());
-                    case "x":
-                        glyph.x = pair.getInt();
-                    case "y":
-                        glyph.y = pair.getInt();
-                    case "width":
-                        glyph.width = pair.getInt();
-                    case "height":
-                        glyph.height = pair.getInt();
-                    case "page":
-                        glyph.page = pages.get(pair.getInt());
-                    case "xoffset":
-                        glyph.xOffset = pair.getInt();
-                    case "yoffset":
-                        glyph.yOffset = pair.getInt();
-                    case "xadvance":
-                        glyph.xAdvance = pair.getInt();
-                    }
-                }
-                _glyphs.set(glyph.charCode, glyph);
-
-            case "kerning":
-                var first :Glyph = null;
-                var second = -1;
-                for (pair in parser.pairs()) {
-                    switch (pair.key) {
-                    case "first":
-                        first = _glyphs.get(pair.getInt());
-                    case "second":
-                        second = pair.getInt();
-                    case "amount":
-                        first._internal_setKerning(second, pair.getInt());
-                    }
-                }
-            }
-        }
+    /**
+     * Disposes the source .fnt File used to create this Font. This can free up some memory, if you
+     * don't intend to recreate this Font later from the same AssetPack.
+     *
+     * @returns This instance, for chaining.
+     */
+    public function disposeFiles () :Font
+    {
+        _file.dispose();
+        return this;
     }
 
     /**
@@ -176,12 +128,13 @@ class Font
         return list;
     }
 
-    public function layoutText (text :String, ?align :TextAlign, wrapWidth :Float = 0) :TextLayout
+    public function layoutText (text :String, ?align :TextAlign, wrapWidth :Float = 0,
+        letterSpacing :Float = 0, lineSpacing :Float = 0) :TextLayout
     {
         if (align == null) {
             align = Left;
         }
-        return new TextLayout(this, text, align, wrapWidth);
+        return new TextLayout(this, text, align, wrapWidth, letterSpacing, lineSpacing);
     }
 
     /**
@@ -192,10 +145,121 @@ class Font
         return _glyphs.get(charCode);
     }
 
+#if debug
+    @:allow(flambe) function checkReload () :Int
+    {
+        // If the .fnt file was reloaded since the last check, reload the font
+        var reloadCount = _file.reloadCount._;
+        if (_lastReloadCount != reloadCount) {
+            _lastReloadCount = reloadCount;
+            reload();
+        }
+        return reloadCount;
+    }
+#end
+
+    private function reload ()
+    {
+        _glyphs = new Map();
+        _glyphs.set(NEWLINE.charCode, NEWLINE);
+
+        var parser = new ConfigParser(_file.toString());
+        var pages = new Map<Int,Texture>();
+
+        // The basename of the font's path, where we'll find the textures
+        var idx = name.lastIndexOf("/");
+        var basePath = (idx >= 0) ? name.substr(0, idx+1) : "";
+
+        // BMFont spec: http://www.angelcode.com/products/bmfont/doc/file_format.html
+        for (keyword in parser.keywords()) {
+            switch (keyword) {
+            case "info":
+                for (pair in parser.pairs()) {
+                    switch (pair.key) {
+                    case "size":
+                        size = pair.getInt();
+                    }
+                }
+
+            case "common":
+                for (pair in parser.pairs()) {
+                    switch (pair.key) {
+                    case "lineHeight":
+                        lineHeight = pair.getInt();
+                    }
+                }
+
+            case "page":
+                var pageId :Int = 0;
+                var file :String = null;
+                for (pair in parser.pairs()) {
+                    switch (pair.key) {
+                    case "id":
+                        pageId = pair.getInt();
+                    case "file":
+                        file = pair.getString();
+                    }
+                }
+                pages.set(pageId, _pack.getTexture(basePath + file.removeFileExtension()));
+
+            case "char":
+                var glyph = null;
+                for (pair in parser.pairs()) {
+                    switch (pair.key) {
+                    case "id":
+                        glyph = new Glyph(pair.getInt());
+                    case "x":
+                        glyph.x = pair.getInt();
+                    case "y":
+                        glyph.y = pair.getInt();
+                    case "width":
+                        glyph.width = pair.getInt();
+                    case "height":
+                        glyph.height = pair.getInt();
+                    case "page":
+                        glyph.page = pages.get(pair.getInt());
+                    case "xoffset":
+                        glyph.xOffset = pair.getInt();
+                    case "yoffset":
+                        glyph.yOffset = pair.getInt();
+                    case "xadvance":
+                        glyph.xAdvance = pair.getInt();
+                    }
+                }
+                _glyphs.set(glyph.charCode, glyph);
+
+            case "kerning":
+                var first :Glyph = null;
+                var second = 0, amount = 0;
+                for (pair in parser.pairs()) {
+                    switch (pair.key) {
+                    case "first":
+                        first = _glyphs.get(pair.getInt());
+                    case "second":
+                        second = pair.getInt();
+                    case "amount":
+                        amount = pair.getInt();
+                    }
+                }
+                if (first != null && amount != 0) {
+                    first.setKerning(second, amount);
+                }
+            }
+        }
+    }
+
     // A special glyph to handle the newline character, which is not included in most fonts
     private static var NEWLINE = new Glyph('\n'.code);
 
-    private var _glyphs :IntHash<Glyph>;
+    private var _pack :AssetPack;
+    private var _file :File;
+    private var _glyphs :Map<Int,Glyph>;
+
+#if debug
+    // Used to track live-reloading updates. A signal listener can't be used here, because we can't
+    // guarantee it'll be properly disposed
+    private var _lastReloadCount :Int;
+#end
 }
 
 /**
@@ -224,7 +288,7 @@ class Glyph
 
     public var xAdvance :Int = 0;
 
-    /** @private */ public function new (charCode :Int)
+    @:allow(flambe) function new (charCode :Int)
     {
         this.charCode = charCode;
     }
@@ -236,7 +300,7 @@ class Glyph
     {
         // Avoid drawing whitespace
         if (width > 0) {
-            g.drawSubImage(page, destX + xOffset, destY + yOffset, x, y, width, height);
+            g.drawSubTexture(page, destX + xOffset, destY + yOffset, x, y, width, height);
         }
     }
 
@@ -245,15 +309,15 @@ class Glyph
         return (_kernings != null) ? Std.int(_kernings.get(nextCharCode)) : 0;
     }
 
-    /** @private */ public function _internal_setKerning (nextCharCode :Int, amount :Int)
+    @:allow(flambe) function setKerning (nextCharCode :Int, amount :Int)
     {
         if (_kernings == null) {
-            _kernings = new IntHash();
+            _kernings = new Map();
         }
         _kernings.set(nextCharCode, amount);
     }
 
-    private var _kernings :IntHash<Int> = null;
+    private var _kernings :Map<Int,Int> = null;
 }
 
 enum TextAlign
@@ -274,11 +338,13 @@ class TextLayout
     /** The number of lines in this text. */
     public var lines (default, null) :Int = 0;
 
-    /** @private */ public function new (font :Font, text :String, align :TextAlign, wrapWidth :Float)
+    @:allow(flambe) function new (font :Font, text :String, align :TextAlign, wrapWidth :Float,
+        letterSpacing :Float, lineSpacing :Float)
     {
         _font = font;
         _glyphs = [];
         _offsets = [];
+        _lineOffset = Math.round(font.lineHeight + lineSpacing);
 
         bounds = new Rectangle();
         var lineWidths = [];
@@ -313,7 +379,7 @@ class TextLayout
         var ii = 0;
         while (ii < _glyphs.length) {
             var glyph = _glyphs[ii];
-            _offsets[ii] = lineWidth;
+            _offsets[ii] = Math.round(lineWidth);
 
             var wordWrap = wrapWidth > 0 && lineWidth + glyph.width > wrapWidth;
             if (wordWrap || glyph == newline) {
@@ -329,14 +395,14 @@ class TextLayout
                 }
                 lastSpaceIdx = -1;
 
-                lineHeight = font.size;
+                lineHeight = _lineOffset;
                 addLine();
 
             } else {
                 if (glyph.charCode == " ".code) {
                     lastSpaceIdx = ii;
                 }
-                lineWidth += glyph.xAdvance;
+                lineWidth += glyph.xAdvance + letterSpacing;
                 lineHeight = FMath.max(lineHeight, glyph.height + glyph.yOffset);
 
                 // Handle kerning with the next glyph
@@ -366,7 +432,7 @@ class TextLayout
             var glyph = _glyphs[ii];
 
             if (glyph.charCode == "\n".code) {
-                lineY += font.size;
+                lineY += _lineOffset;
                 ++line;
                 alignOffset = getAlignOffset(align, lineWidths[line], wrapWidth);
             }
@@ -385,7 +451,7 @@ class TextLayout
     }
 
     /** Draws this text to a Graphics. */
-    public function draw (g :Graphics, align :TextAlign)
+    public function draw (g :Graphics)
     {
         var y = 0.0;
         var ii = 0;
@@ -394,7 +460,7 @@ class TextLayout
         while (ii < ll) {
             var glyph = _glyphs[ii];
             if (glyph.charCode == "\n".code) {
-                y += _font.size;
+                y += _lineOffset;
             } else {
                 var x = _offsets[ii];
                 glyph.draw(g, x, y);
@@ -409,13 +475,14 @@ class TextLayout
         switch (align) {
             case Left: return 0;
             case Right: return totalWidth - lineWidth;
-            case Center: return (totalWidth - lineWidth) / 2;
+            case Center: return Math.round((totalWidth-lineWidth) / 2);
         }
     }
 
     private var _font :Font;
     private var _glyphs :Array<Glyph>;
     private var _offsets :Array<Float>;
+    private var _lineOffset :Float;
 }
 
 private class ConfigParser
@@ -423,8 +490,8 @@ private class ConfigParser
     public function new (config :String)
     {
         _configText = config;
-        _keywordPattern = ~/([a-z]+)(.*)/;
-        _pairPattern = ~/([a-z]+)=("[^"]*"|[^\s]+)/;
+        _keywordPattern = ~/([A-Za-z]+)(.*)/;
+        _pairPattern = ~/([A-Za-z]+)=("[^"]*"|[^\s]+)/;
     }
 
     public function keywords () :Iterator<String>

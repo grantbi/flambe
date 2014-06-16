@@ -4,7 +4,9 @@
 
 package flambe.platform.html;
 
-import js.Lib;
+import js.Browser;
+import js.html.*;
+import js.html.webgl.RenderingContext;
 
 import flambe.display.Orientation;
 
@@ -16,17 +18,21 @@ class HtmlUtil
      * Whether the annoying scrolling address bar in some iOS and Android browsers may be hidden.
      */
     public static var SHOULD_HIDE_MOBILE_BROWSER =
-        Lib.window.top == Lib.window &&
-        ~/Mobile(\/.*)? Safari/.match(Lib.window.navigator.userAgent);
+#if !flambe_disable_hide_mobile_browser
+        Browser.window.top == Browser.window &&
+        ~/Mobile(\/.*)? Safari/.match(Browser.navigator.userAgent);
+#else
+        false;
+#end
 
     public static function callLater (func :Void -> Void, delay :Int = 0)
     {
-        (untyped Lib.window).setTimeout(func, delay);
+        Browser.window.setTimeout(func, delay);
     }
 
     public static function hideMobileBrowser ()
     {
-        Lib.window.scrollTo(1, 0);
+        Browser.window.scrollTo(1, 0);
     }
 
     // Load a prefixed vendor extension
@@ -34,7 +40,7 @@ class HtmlUtil
         name :String, ?obj :Dynamic) :{ prefix :String, field :String, value :Dynamic }
     {
         if (obj == null) {
-            obj = Lib.window;
+            obj = Browser.window;
         }
 
         // Try to load it as is
@@ -75,7 +81,7 @@ class HtmlUtil
     public static function polyfill (name :String, ?obj :Dynamic) :Bool
     {
         if (obj == null) {
-            obj = Lib.window;
+            obj = Browser.window;
         }
 
         var value = loadExtension(name, obj).value;
@@ -95,7 +101,7 @@ class HtmlUtil
         style.setProperty(name, value);
     }
 
-    public static function addVendorListener (dispatcher :Dynamic, type :String,
+    public static function addVendorListener (dispatcher :EventTarget, type :String,
         listener :Dynamic -> Void, useCapture :Bool)
     {
         for (prefix in VENDOR_PREFIXES) {
@@ -122,24 +128,67 @@ class HtmlUtil
         return (untyped Date).now();
     }
 
-    public static function createEmptyCanvas (width :Int, height :Int) :Dynamic
+    public static function createEmptyCanvas (width :Int, height :Int) :CanvasElement
     {
-        var canvas :Dynamic = Lib.document.createElement("canvas");
+        var canvas = Browser.document.createCanvasElement();
         canvas.width = width;
         canvas.height = height;
         return canvas;
     }
 
-    public static function createCanvas (source :Dynamic) :Dynamic
+    public static function createCanvas (source :CanvasElement) :CanvasElement
     {
         var canvas = createEmptyCanvas(source.width, source.height);
 
-        var ctx = canvas.getContext("2d");
+        var ctx = canvas.getContext2d();
         ctx.save();
         ctx.globalCompositeOperation = "copy";
         ctx.drawImage(source, 0, 0);
         ctx.restore();
 
         return canvas;
+    }
+
+    public static function detectSlowDriver (gl :RenderingContext) :Bool
+    {
+        // Try to detect SwiftShader. There will be some false positives here, but falling back to
+        // canvas in those cases is better than using WebGL on a software driver.
+        // http://stackoverflow.com/questions/10456491/detect-swiftshader-webgl-renderer-in-chrome-18
+        //
+        // TODO(bruno): Use http://www.khronos.org/registry/webgl/extensions/WEBGL_debug_renderer_info/
+
+        var windows = (Browser.navigator.platform.indexOf("Win") >= 0);
+        if (windows) {
+            var chrome = ((untyped Browser.window).chrome != null);
+            if (chrome) {
+                for (ext in gl.getSupportedExtensions()) {
+                    if (ext.indexOf("WEBGL_compressed_texture") >= 0) {
+                        return false;
+                    }
+                }
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public static function fixAndroidMath ()
+    {
+        // Some versions of V8 on ARM (like the one in the stock Android 4 browser) are affected by
+        // this nasty bug: https://code.google.com/p/v8/issues/detail?id=2234
+        //
+        // So, hack around it. This doesn't affect Android 2. Hopefully 5 will use an updated V8
+        // with the real fix.
+
+        if (Browser.navigator.userAgent.indexOf("Linux; U; Android 4") >= 0) {
+            Log.warn("Monkey patching around Android sin/cos bug");
+            var sin = Math.sin, cos = Math.cos;
+            (untyped Math).sin = function (x) {
+                return (x == 0) ? 0 : sin(x);
+            };
+            (untyped Math).cos = function (x) {
+                return (x == 0) ? 1 : cos(x);
+            }
+        }
     }
 }

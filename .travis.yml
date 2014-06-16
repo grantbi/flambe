@@ -2,12 +2,8 @@
 # Continuous integration config
 # http://travis-ci.org/aduros/flambe
 
-# wafl should support both Python versions
-language: python
-python:
-    - 2.6
-    - 2.7
-    - 3.2
+language: node_js
+node_js: ["0.8", "0.10"]
 env:
     global:
         - secure: "gIXPIfKJcPgQxR/1YuT3RzNjoJCPRK7gsck9Z0IeyRoQH0PVblbov8K49wz8\nMsV7GpUbLhD8p/V4MbKCodhrC+rZUjr/zPnu6KHg+B6tkOk1bc2YKqrK5q7b\n4BBKgSSJS0jHudzzWAPfDDhPbnjRaBnrlONgVMVk5BS//g1KIbc="
@@ -16,10 +12,8 @@ env:
 before_script:
     - sudo add-apt-repository ppa:eyecreate/haxe -y
     - sudo apt-get update -y
-    - sudo apt-get install haxe2 -y
+    - sudo apt-get install haxe -y
     - mkdir -p ~/.haxe/lib
-    - echo ~/.haxe/lib | haxelib setup
-    - until haxelib install format 1.26; do sleep 1; done
-    - until haxelib install nape 2.0.8; do sleep 1; done
+    - haxelib setup ~/.haxe/lib
 
 script: bin/run-travis

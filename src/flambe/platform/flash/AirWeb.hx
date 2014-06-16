@@ -11,9 +11,9 @@ import flash.geom.Rectangle;
 import flash.media.StageWebView;
 
 import flambe.animation.AnimatedFloat;
+import flambe.subsystem.WebSystem;
 import flambe.util.Signal1;
 import flambe.util.Value;
-import flambe.web.Web;
 import flambe.web.WebView;
 
 class AirWeb extends FlashWeb
@@ -48,7 +48,7 @@ class AirWeb extends FlashWeb
 }
 
 class AirWebView
-    implements WebView,
+    implements WebView
     implements Tickable
 {
     public var url (default, null) :Value<String>;

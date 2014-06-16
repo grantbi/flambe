@@ -5,9 +5,9 @@
 package flambe.input;
 
 /**
- * <p>A 3D vector that represents the linear acceleration being applied to the device.</p>
+ * A 3D vector that represents the linear acceleration being applied to the device.
  *
- * <p><img src="https://aduros.com/flambe/images/Axes.png"></p>
+ * <img src="https://aduros.com/flambe/images/Axes.png">
  */
 class Acceleration
 {
@@ -20,23 +20,15 @@ class Acceleration
     /** The acceleration on the Z-axis, in m/s^2. */
     public var z (default, null) :Float;
 
-    /**
-     * Whether this acceleration vector includes the pull of gravity. Gravity is normally excluded,
-     * but some devices may be forced to include it due to lack of gyroscope.
-     */
-    public var includesGravity (default, null) :Bool;
-
-    /** @private */ public function new ()
+    @:allow(flambe) function new ()
     {
-        _internal_init(0, 0, 0, false);
+        init(0, 0, 0);
     }
 
-    /** @private */ public function _internal_init (
-        x :Float, y :Float, z :Float, includesGravity :Bool)
+    @:allow(flambe) function init (x :Float, y :Float, z :Float)
     {
         this.x = x;
         this.y = y;
         this.z = z;
-        this.includesGravity = includesGravity;
     }
 }

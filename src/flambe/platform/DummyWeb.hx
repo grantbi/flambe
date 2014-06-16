@@ -4,14 +4,14 @@
 
 package flambe.platform;
 
+import flambe.subsystem.WebSystem;
 import flambe.util.Assert;
-import flambe.web.Web;
 import flambe.web.WebView;
 
 class DummyWeb
-    implements Web
+    implements WebSystem
 {
-    public var supported (get_supported, null) :Bool;
+    public var supported (get, null) :Bool;
 
     public function new ()
     {

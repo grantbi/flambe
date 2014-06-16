@@ -6,6 +6,7 @@ package flambe.platform;
 
 import flambe.asset.AssetEntry;
 import flambe.asset.AssetPack;
+import flambe.asset.File;
 import flambe.asset.Manifest;
 import flambe.display.Texture;
 import flambe.sound.Sound;
@@ -13,18 +14,21 @@ import flambe.util.Assert;
 import flambe.util.Promise;
 
 using Lambda;
+using flambe.util.Arrays;
 using flambe.util.Strings;
 
 class BasicAssetPackLoader
 {
     public var promise (default, null) :Promise<AssetPack>;
+    public var manifest (default, null) :Manifest;
 
     public function new (platform :Platform, manifest :Manifest)
     {
+        this.manifest = manifest;
         _platform = platform;
         promise = new Promise();
-        _bytesLoaded = new Hash();
-        _pack = new BasicAssetPack(manifest);
+        _bytesLoaded = new Map();
+        _pack = new BasicAssetPack(manifest, this);
 
         var entries = manifest.array();
         if (entries.length == 0) {
@@ -32,7 +36,7 @@ class BasicAssetPackLoader
             handleSuccess();
 
         } else {
-            var groups = new Hash<Array<AssetEntry>>();
+            var groups = new Map<String,Array<AssetEntry>>();
 
             // Group assets by name
             for (entry in entries) {
@@ -70,6 +74,55 @@ class BasicAssetPackLoader
                 });
             }
         }
+
+#if debug
+        var catapult = _platform.getCatapultClient();
+        if (catapult != null) {
+            catapult.add(this);
+        }
+#end
+    }
+
+    /** Reload any asset that matches this URL (ignoring the ?v= query param). */
+    public function reload (url :String)
+    {
+        // Find the AssetEntry that matches this url
+        var baseUrl = removeUrlParams(url);
+        var foundEntry = null;
+        for (entry in manifest) {
+            if (baseUrl == removeUrlParams(entry.url)) {
+                foundEntry = entry;
+                break;
+            }
+        }
+
+        // If the entry was found in this manifest, and is a supported format
+        if (foundEntry != null) {
+            getAssetFormats(function (formats :Array<AssetFormat>) {
+                if (formats.indexOf(foundEntry.format) >= 0) {
+                    // Dummy up a new AssetEntry based on the previous one, and reload it
+                    var entry = new AssetEntry(foundEntry.name, url, foundEntry.format, 0);
+                    loadEntry(manifest.getFullURL(entry), entry);
+                }
+            });
+        }
+    }
+
+    /** Called when this loader's AssetPack is disposed. */
+    public function onDisposed ()
+    {
+#if debug
+        var catapult = _platform.getCatapultClient();
+        if (catapult != null) {
+            catapult.remove(this);
+        }
+#end
+    }
+
+    private static function removeUrlParams (url :String) :String
+    {
+        var query = url.indexOf("?");
+        return (query > 0) ? url.substr(0, query) : url;
     }
 
     /**
@@ -104,25 +157,41 @@ class BasicAssetPackLoader
         Assert.fail(); // See subclasses
     }
 
-    private function handleLoad (entry :AssetEntry, asset :Dynamic)
+    private function handleLoad<A/*:BasicAsset<A>*/> (entry :AssetEntry, asset :A)
     {
+        if (_pack.disposed) {
+            return; // Pack was disposed earlier, forget about it
+        }
+
         // Ensure this asset has been fully progressed
         handleProgress(entry, entry.bytes);
 
-        var name = entry.name;
+        var map :Map<String,Dynamic>;
         switch (entry.format) {
-        case WEBP, JXR, PNG, JPG, GIF:
-            _pack.textures.set(name, asset);
-        case MP3, M4A, OGG, WAV:
-            _pack.sounds.set(name, asset);
+        case WEBP, JXR, PNG, JPG, GIF, DDS, PVR, PKM:
+            map = _pack.textures;
+        case MP3, M4A, OPUS, OGG, WAV:
+            map = _pack.sounds;
         case Data:
-            _pack.files.set(name, asset);
+            map = _pack.files;
         }
 
-        _assetsRemaining -= 1;
-        if (_assetsRemaining <= 0) {
-            handleSuccess();
+#if debug // Allow some methods to get stripped in release builds, which don't allow reloading
+        var oldAsset :BasicAsset<A> = cast map.get(entry.name);
+        if (oldAsset != null) {
+            Log.info("Reloaded asset", ["url", entry.url]);
+            oldAsset.reload(asset);
+
+        } else {
+#end
+            map.set(entry.name, asset);
+            _assetsRemaining -= 1;
+            if (_assetsRemaining == 0) {
+                handleSuccess();
+            }
+#if debug
         }
+#end
     }
 
     private function handleProgress (entry :AssetEntry, bytesLoaded :Int)
@@ -155,7 +224,7 @@ class BasicAssetPackLoader
     private static function isAudio (format :AssetFormat) :Bool
     {
         switch (format) {
-            case MP3, M4A, OGG, WAV: return true;
+            case MP3, M4A, OPUS, OGG, WAV: return true;
             default: return false;
         }
     }
@@ -166,31 +235,37 @@ class BasicAssetPackLoader
     private var _assetsRemaining :Int;
 
     // How many bytes of each asset have been loaded
-    private var _bytesLoaded :Hash<Int>;
+    private var _bytesLoaded :Map<String,Int>;
 
     private var _pack :BasicAssetPack;
 }
 
-// A simple AssetPack backed by a Hash
+// A simple AssetPack backed by a Map
 private class BasicAssetPack
     implements AssetPack
 {
-    public var manifest (get_manifest, null) :Manifest;
+    public var manifest (get, null) :Manifest;
+    public var loader (default, null) :BasicAssetPackLoader;
 
-    public var textures :Hash<Texture>;
-    public var sounds :Hash<Sound>;
-    public var files :Hash<String>;
+    public var textures :Map<String,Texture>;
+    public var sounds :Map<String,Sound>;
+    public var files :Map<String,File>;
 
-    public function new (manifest :Manifest)
+    public var disposed :Bool = false;
+
+    public function new (manifest :Manifest, loader :BasicAssetPackLoader)
     {
         _manifest = manifest;
-        textures = new Hash();
-        sounds = new Hash();
-        files = new Hash();
+        this.loader = loader;
+
+        textures = new Map();
+        sounds = new Map();
+        files = new Map();
     }
 
     public function getTexture (name :String, required :Bool = true) :Texture
     {
+        assertNotDisposed();
 #if debug
         warnOnExtension(name);
 #end
@@ -203,6 +278,7 @@ private class BasicAssetPack
 
     public function getSound (name :String, required :Bool = true) :Sound
     {
+        assertNotDisposed();
 #if debug
         warnOnExtension(name);
 #end
@@ -213,8 +289,10 @@ private class BasicAssetPack
         return sound;
     }
 
-    public function getFile (name :String, required :Bool = true) :String
+    public function getFile (name :String, required :Bool = true) :File
     {
+        assertNotDisposed();
+
         var file = files.get(name);
         if (file == null && required) {
             throw "Missing file".withFields(["name", name]);
@@ -222,9 +300,39 @@ private class BasicAssetPack
         return file;
     }
 
-    public function get_manifest () :Manifest
+    // Dispose all assets contained in this pack
+    public function dispose ()
+    {
+        if (!disposed) {
+            disposed = true;
+
+            for (texture in textures) {
+                texture.dispose();
+            }
+            textures = null;
+
+            for (sound in sounds) {
+                sound.dispose();
+            }
+            sounds = null;
+
+            for (file in files) {
+                file.dispose();
+            }
+            files = null;
+
+            loader.onDisposed();
+        }
+    }
+
+    inline private function get_manifest () :Manifest
     {
         return _manifest;
+    }
+
+    inline private function assertNotDisposed ()
+    {
+        Assert.that(!disposed, "AssetPack cannot be used after being disposed");
     }
 
     private static function warnOnExtension (path :String)

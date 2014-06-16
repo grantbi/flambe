@@ -9,28 +9,26 @@ import flambe.util.Signal2;
 /**
  * Wraps a single value, notifying listeners when the value changes.
  */
-class Value<A>
-#if (flash || cpp || cs || java)
-    implements haxe.rtti.Generic // Generate typed templates on static targets
+#if !js
+@:generic // Generate typed templates on static targets
 #end
+class Value<A>
 {
     /**
-     * The wrapped value, setting this to a different value will fire the 'changed' signal.
+     * The wrapped value, setting this to a different value will fire the `changed` signal.
      */
-    public var _ (get__, set__) :A;
+    public var _ (get, set) :A;
 
     /**
      * Emitted when the value has changed. The first listener parameter is the new current value,
      * the second parameter is the old previous value.
      */
-    public var changed (get_changed, null) :Signal2<A,A>;
+    public var changed (get, null) :Signal2<A,A>;
 
     public function new (value :A, ?listener :Listener2<A,A>)
     {
         _value = value;
-        if (listener != null) {
-            _changed = new Signal2(listener);
-        }
+        _changed = (listener != null) ? new Signal2(listener) : null;
     }
 
     /**
@@ -70,7 +68,7 @@ class Value<A>
 
     #if debug @:keep #end public function toString () :String
     {
-        return cast _value;
+        return ""+_value;
     }
 
     private var _value :A;

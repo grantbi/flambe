@@ -4,28 +4,33 @@
 
 package flambe.platform;
 
-import flambe.input.Mouse;
 import flambe.input.MouseButton;
 import flambe.input.MouseCursor;
 import flambe.input.MouseEvent;
+import flambe.subsystem.MouseSystem;
 import flambe.util.Signal1;
 
 class DummyMouse
-    implements Mouse
+    implements MouseSystem
 {
-    public var supported (get_supported, null) :Bool;
+    public var supported (get, null) :Bool;
 
     public var down (default, null) :Signal1<MouseEvent>;
     public var move (default, null) :Signal1<MouseEvent>;
     public var up (default, null) :Signal1<MouseEvent>;
     public var scroll (default, null) :Signal1<Float>;
 
-    public var x (get_x, null) :Float;
-    public var y (get_y, null) :Float;
-    public var cursor (get_cursor, set_cursor) :MouseCursor;
+    public var x (get, null) :Float;
+    public var y (get, null) :Float;
+    public var cursor (get, set) :MouseCursor;
 
     public function new ()
     {
+        down = new Signal1();
+        move = new Signal1();
+        up = new Signal1();
+        scroll = new Signal1();
+
         _cursor = Default;
     }
 

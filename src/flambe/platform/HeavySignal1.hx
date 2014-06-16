@@ -30,9 +30,9 @@ class HeavySignal1<A> extends Signal1<A>
         return connection;
     }
 
-    override public function _internal_disconnect (conn :SignalConnection)
+    override private function disconnect (conn :SignalConnection)
     {
-        super._internal_disconnect(conn);
+        super.disconnect(conn);
         hasListenersValue._ = hasListeners();
     }
 

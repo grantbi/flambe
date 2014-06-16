@@ -4,12 +4,12 @@
 
 package flambe.platform;
 
-import flambe.external.External;
+import flambe.subsystem.ExternalSystem;
 
 class DummyExternal
-    implements External
+    implements ExternalSystem
 {
-    public var supported (get_supported, null) :Bool;
+    public var supported (get, null) :Bool;
 
     public function new ()
     {

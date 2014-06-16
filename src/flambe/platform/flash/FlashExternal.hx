@@ -6,12 +6,12 @@ package flambe.platform.flash;
 
 import flash.external.ExternalInterface;
 
-import flambe.external.External;
+import flambe.subsystem.ExternalSystem;
 
 class FlashExternal
-    implements External
+    implements ExternalSystem
 {
-    public var supported (get_supported, null) :Bool;
+    public var supported (get, null) :Bool;
 
     public function new ()
     {

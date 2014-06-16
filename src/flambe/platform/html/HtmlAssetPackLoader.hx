@@ -4,8 +4,8 @@
 
 package flambe.platform.html;
 
-import js.Dom;
-import js.Lib;
+import js.Browser;
+import js.html.*;
 
 import haxe.Http;
 
@@ -27,7 +27,7 @@ class HtmlAssetPackLoader extends BasicAssetPackLoader
     {
         switch (entry.format) {
         case WEBP, JXR, PNG, JPG, GIF:
-            var image :Dynamic = untyped __new__("Image");
+            var image = Browser.document.createImageElement();
             var events = new EventGroup();
 
             events.addDisposingListener(image, "load", function (_) {
@@ -43,7 +43,7 @@ class HtmlAssetPackLoader extends BasicAssetPackLoader
                     _URL.revokeObjectURL(image.src);
                 }
 
-                var texture = _platform.getRenderer().createTexture(image);
+                var texture = _platform.getRenderer().createTextureFromImage(image);
                 if (texture != null) {
                     handleLoad(entry, texture);
                 } else {
@@ -57,17 +57,28 @@ class HtmlAssetPackLoader extends BasicAssetPackLoader
             // If this browser supports Blob, load the image data over XHR to benefit from progress
             // events, otherwise just set the src directly
             if (supportsBlob()) {
-                sendRequest(url, entry, "blob", function (blob) {
+                downloadBlob(url, entry, function (blob) {
                     image.src = _URL.createObjectURL(blob);
                 });
             } else {
                 image.src = url;
             }
 
-        case MP3, M4A, OGG, WAV:
+        case DDS, PVR, PKM:
+            downloadArrayBuffer(url, entry, function (buffer) {
+                // FIXME(bruno): Convert buffer to a Bytes and pass it along
+                var texture = _platform.getRenderer().createCompressedTexture(entry.format, null);
+                if (texture != null) {
+                    handleLoad(entry, texture);
+                } else {
+                    handleTextureError(entry);
+                }
+            });
+
+        case MP3, M4A, OPUS, OGG, WAV:
             // If we made it this far, we definitely support audio and can play this asset
             if (WebAudioSound.supported) {
-                sendRequest(url, entry, "arraybuffer", function (buffer) {
+                downloadArrayBuffer(url, entry, function (buffer) {
                     WebAudioSound.ctx.decodeAudioData(buffer, function (decoded) {
                         handleLoad(entry, new WebAudioSound(decoded));
                     }, function () {
@@ -81,14 +92,14 @@ class HtmlAssetPackLoader extends BasicAssetPackLoader
                 });
 
             } else {
-                var audio :Dynamic = Lib.document.createElement("audio");
+                var audio = Browser.document.createAudioElement();
                 audio.preload = "auto"; // Hint that we want to preload the entire file
 
                 // Maintain a hard reference to the audio during loading to prevent GC on some
                 // browsers
                 var ref = ++_mediaRefCount;
                 if (_mediaElements == null) {
-                    _mediaElements = new IntHash();
+                    _mediaElements = new Map<Int,Dynamic>();
                 }
                 _mediaElements.set(ref, audio);
 
@@ -124,14 +135,9 @@ class HtmlAssetPackLoader extends BasicAssetPackLoader
             }
 
         case Data:
-            sendRequest(url, entry, "text", function (text) {
-                handleLoad(entry, text);
+            downloadText(url, entry, function (text) {
+                handleLoad(entry, new BasicFile(text));
             });
-
-        default:
-            // Should never happen
-            Assert.fail("Unsupported format", ["format", entry.format]);
-            return;
         }
     }
 
@@ -140,74 +146,106 @@ class HtmlAssetPackLoader extends BasicAssetPackLoader
         if (_supportedFormats == null) {
             _supportedFormats = new Promise();
             detectImageFormats(function (imageFormats) {
-                _supportedFormats.result = imageFormats.concat(detectAudioFormats()).concat([Data]);
+                _supportedFormats.result = _platform.getRenderer().getCompressedTextureFormats()
+                    .concat(imageFormats).concat(detectAudioFormats()).concat([Data]);
             });
         }
         _supportedFormats.get(fn);
     }
 
-    private function sendRequest (url :String, entry :AssetEntry, responseType :String, onLoad :Dynamic -> Void)
+    inline private function downloadArrayBuffer (url :String, entry :AssetEntry, onLoad :ArrayBuffer -> Void)
     {
-        var xhr :Dynamic = untyped __new__("XMLHttpRequest");
+        download(url, entry, "arraybuffer", onLoad);
+    }
 
-        var lastActivity = 0.0;
-        var start = function () {
-            lastActivity = HtmlUtil.now();
+    inline private function downloadBlob (url :String, entry :AssetEntry, onLoad :Blob -> Void)
+    {
+        download(url, entry, "blob", onLoad);
+    }
+
+    inline private function downloadText (url :String, entry :AssetEntry, onLoad :String -> Void)
+    {
+        download(url, entry, "text", onLoad);
+    }
+
+    private function download (url :String, entry :AssetEntry, responseType :String, onLoad :Dynamic -> Void)
+    {
+        var xhr :XMLHttpRequest = null;
+        var start = null;
+
+        var intervalId = 0;
+        var hasInterval = false;
+        var clearRetryInterval = function () {
+            if (hasInterval) {
+                hasInterval = false;
+                Browser.window.clearInterval(intervalId);
+            }
+        };
+
+        var retries = XHR_RETRIES;
+        var maybeRetry = function () {
+            // Returns true if the download was retried
+            --retries;
+            if (retries >= 0) {
+                Log.warn("Retrying asset download", ["url", entry.url]);
+                start();
+                return true;
+            }
+            return false;
+        };
+
+        start = function () {
+            clearRetryInterval();
+
+            if (xhr != null) {
+                xhr.abort();
+            }
+            xhr = new XMLHttpRequest();
             xhr.open("GET", url, true);
             xhr.responseType = responseType;
-            if (xhr.responseType == "") {
-                // Dumb hack for iOS 6, which supports blobs but not the blob responseType
-                xhr.responseType = "arraybuffer";
-            }
+
+            var lastProgress = 0.0;
+            xhr.onprogress = function (event :ProgressEvent) {
+                // When the first progress event comes in, start detecting stalled downloads
+                if (!hasInterval) {
+                    hasInterval = true;
+                    intervalId = Browser.window.setInterval(function () {
+                        // If the download isn't finished, and enough time has passed since the last
+                        // progress event, consider it stalled and attempt to retry
+                        if (xhr.readyState != XMLHttpRequest.DONE && HtmlUtil.now() - lastProgress > XHR_TIMEOUT) {
+                            if (!maybeRetry()) {
+                                clearRetryInterval();
+                                handleError(entry, "Download stalled");
+                            }
+                        }
+                    }, 1000);
+                }
+
+                lastProgress = HtmlUtil.now();
+                handleProgress(entry, event.loaded);
+            };
+
+            xhr.onerror = function (_) {
+                if (xhr.status != 0 || !maybeRetry()) {
+                    clearRetryInterval();
+                    handleError(entry, "HTTP error " + xhr.status);
+                }
+            };
+
+            xhr.onload = function (_) {
+                var response :Dynamic = xhr.response;
+                if (response == null) {
+                    // Hack for IE9, which doesn't have xhr.response, only responseText
+                    response = xhr.responseText;
+                }
+                clearRetryInterval();
+                onLoad(response);
+            };
+
             xhr.send();
         };
 
-        var interval = 0;
-        if (untyped __js__("typeof")(xhr.onprogress) != "undefined") {
-            var attempts = XHR_ATTEMPTS;
-            xhr.onprogress = function (event :Dynamic) {
-                lastActivity = HtmlUtil.now();
-                handleProgress(entry, event.loaded);
-            };
-            interval = (untyped Lib.window).setInterval(function () {
-                // If the download has started, and enough time has passed since the last progress
-                // event, consider it stalled and abort
-                if (xhr.readyState >= 1 && HtmlUtil.now() - lastActivity > XHR_TIMEOUT) {
-                    xhr.abort();
-
-                    // Retry stalled connections a few times
-                    --attempts;
-                    if (attempts > 0) {
-                        Log.warn("Retrying stalled asset request", ["url", entry.url]);
-                        start();
-                    } else {
-                        (untyped Lib.window).clearInterval(interval);
-                        handleError(entry, "Request timed out");
-                    }
-                }
-            }, 1000);
-        }
-
-        xhr.onload = function (_) {
-            (untyped Lib.window).clearInterval(interval);
-
-            var response = xhr.response;
-            if (response == null) {
-                // Hack for IE9, which doesn't have xhr.response, only responseText
-                response = xhr.responseText;
-            } else if (responseType == "blob" && xhr.responseType == "arraybuffer") {
-                // Dumb hack for iOS 6, which supports blobs but not the blob responseType
-                response = untyped __new__("Blob", [xhr.response]);
-            }
-            onLoad(response);
-        };
-        xhr.onerror = function (_) {
-            (untyped Lib.window).clearInterval(interval);
-            handleError(entry, "Failed to load asset: error #" + xhr.status);
-        };
-
         start();
-        return xhr;
     }
 
     private static function detectImageFormats (fn :Array<AssetFormat> -> Void)
@@ -225,8 +263,8 @@ class HtmlAssetPackLoader extends BasicAssetPackLoader
 
         // Detect WebP-lossless support (and assume that lossy works where lossless does)
         // https://github.com/Modernizr/Modernizr/blob/master/feature-detects/img/webp-lossless.js
-        var webp :Dynamic = untyped __new__("Image");
-        webp.onload = webp.onerror = function () {
+        var webp = Browser.document.createImageElement();
+        webp.onload = webp.onerror = function (_) {
             if (webp.width == 1) {
                 formats.unshift(WEBP);
             }
@@ -235,8 +273,8 @@ class HtmlAssetPackLoader extends BasicAssetPackLoader
         webp.src = "data:image/webp;base64,UklGRhoAAABXRUJQVlA4TA0AAAAvAAAAEAcQERGIiP4HAA==";
 
         // Detect JPEG XR support
-        var jxr :Dynamic = untyped __new__("Image");
-        jxr.onload = jxr.onerror = function () {
+        var jxr = Browser.document.createImageElement();
+        jxr.onload = jxr.onerror = function (_) {
             if (jxr.width == 1) {
                 formats.unshift(JXR);
             }
@@ -250,15 +288,19 @@ class HtmlAssetPackLoader extends BasicAssetPackLoader
     private static function detectAudioFormats () :Array<AssetFormat>
     {
         // Detect basic support for HTML5 audio
-        var element :Dynamic = Lib.document.createElement("audio");
-        if (element == null || element.canPlayType == null) {
+        var audio = Browser.document.createAudioElement();
+        if (audio == null || audio.canPlayType == null) {
             Log.warn("Audio is not supported at all in this browser!");
             return [];
         }
 
         // Reject browsers that claim to support audio, but are too buggy or incomplete
-        var blacklist = ~/\b(iPhone|iPod|iPad|Android)\b/;
-        var userAgent = Lib.window.navigator.userAgent;
+#if flambe_html_audio_fix
+        var blacklist = ~/\b(iPhone|iPod|iPad|Windows Phone)\b/;
+#else
+        var blacklist = ~/\b(iPhone|iPod|iPad|Android|Windows Phone)\b/;
+#end
+        var userAgent = Browser.navigator.userAgent;
         if (!WebAudioSound.supported && blacklist.match(userAgent)) {
             Log.warn("HTML5 audio is blacklisted for this browser", ["userAgent", userAgent]);
             return [];
@@ -266,17 +308,25 @@ class HtmlAssetPackLoader extends BasicAssetPackLoader
 
         // Select what formats the browser supports
         var types = [
-            { format: M4A, mimeType: "audio/mp4; codecs=mp4a" },
-            { format: MP3, mimeType: "audio/mpeg" },
-            { format: OGG, mimeType: "audio/ogg; codecs=vorbis" },
-            { format: WAV, mimeType: "audio/wav" },
+            { format: M4A,  mimeType: "audio/mp4; codecs=mp4a" },
+            { format: MP3,  mimeType: "audio/mpeg" },
+            { format: OPUS, mimeType: "audio/ogg; codecs=opus" },
+            { format: OGG,  mimeType: "audio/ogg; codecs=vorbis" },
+            { format: WAV,  mimeType: "audio/wav" },
         ];
+#if flambe_disable_firefox_mp3
+        // Temporary hack to disable Firefox MP3 loading. This will no longer be necessary after
+        // Firefox 28: https://bugzilla.mozilla.org/show_bug.cgi?id=967007
+        if (userAgent.indexOf("Gecko/") >= 0) {
+            types.splice(1, 1);
+        }
+#end
         var result = [];
         for (type in types) {
             // IE9's canPlayType() will throw an error in some rare cases:
             // https://github.com/Modernizr/Modernizr/issues/224
             var canPlayType = "";
-            try canPlayType = element.canPlayType(type.mimeType)
+            try canPlayType = audio.canPlayType(type.mimeType)
             catch (_ :Dynamic) {}
 
             if (canPlayType != "") {
@@ -288,10 +338,21 @@ class HtmlAssetPackLoader extends BasicAssetPackLoader
 
     private static function supportsBlob () :Bool
     {
+        // Checks for XHR Blob responseType support
+        // http://html5test.com/compare/feature/communication-xmlhttprequest2.response-blob/communication-websocket.binary.html
         if (_detectBlobSupport) {
             _detectBlobSupport = false;
 
-            var xhr = untyped __new__("XMLHttpRequest");
+            // Blobs on Amazon Silk are buggy: https://github.com/aduros/flambe/issues/194
+            if (~/\bSilk\b/.match(Browser.navigator.userAgent)) {
+                return false;
+            }
+
+            if ((untyped Browser.window).Blob == null) {
+                return false; // No Blob constructor
+            }
+
+            var xhr = new XMLHttpRequest();
             // Hack for IE, which throws an InvalidStateError upon setting the responseType when
             // in the UNSENT state, despite the spec being clear about only throwing in LOADING
             // or DONE: http://www.w3.org/TR/XMLHttpRequest2/#dom-xmlhttprequest-responsetype
@@ -300,10 +361,12 @@ class HtmlAssetPackLoader extends BasicAssetPackLoader
             // request so it's all good.
             xhr.open("GET", ".", true);
 
-            // Ensure the blob responseType is supported
+            if (xhr.responseType != "") {
+                return false; // No responseType supported at all
+            }
             xhr.responseType = "blob";
             if (xhr.responseType != "blob") {
-                return false;
+                return false; // Blob responseType not supported
             }
 
             _URL = HtmlUtil.loadExtension("URL").value;
@@ -312,7 +375,7 @@ class HtmlAssetPackLoader extends BasicAssetPackLoader
     }
 
     private static inline var XHR_TIMEOUT = 5000;
-    private static inline var XHR_ATTEMPTS = 4;
+    private static inline var XHR_RETRIES = 3;
 
     private static var _supportedFormats :Promise<Array<AssetFormat>> = null;
 
@@ -321,7 +384,7 @@ class HtmlAssetPackLoader extends BasicAssetPackLoader
      * shouldn't be GCed while playing, but vague about GCing while loading. So, maintain a hard
      * reference to all media elements being loaded to prevent GC.
      */
-    private static var _mediaElements :IntHash<Dynamic>;
+    private static var _mediaElements :Map<Int,Dynamic>;
     private static var _mediaRefCount = 0;
 
     private static var _detectBlobSupport = true;

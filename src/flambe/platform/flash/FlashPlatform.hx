@@ -4,11 +4,11 @@
 
 package flambe.platform.flash;
 
-#if flash11_2 import flash.events.ThrottleEvent; #end
 import flash.Lib;
 import flash.display.Sprite;
 import flash.events.Event;
 import flash.events.MouseEvent;
+import flash.events.ThrottleEvent;
 import flash.events.TouchEvent;
 import flash.events.UncaughtErrorEvent;
 import flash.external.ExternalInterface;
@@ -17,23 +17,11 @@ import flash.media.SoundTransform;
 import flash.net.SharedObject;
 import flash.system.Capabilities;
 
-import flambe.Entity;
 import flambe.asset.AssetPack;
 import flambe.asset.Manifest;
-import flambe.display.Stage;
-import flambe.external.External;
-import flambe.input.Keyboard;
-import flambe.input.Mouse;
-import flambe.input.Pointer;
-import flambe.input.Touch;
-import flambe.input.Motion;
-import flambe.platform.BasicPointer;
-import flambe.platform.MainLoop;
-import flambe.platform.Platform;
-import flambe.storage.Storage;
+import flambe.subsystem.*;
 import flambe.util.Logger;
 import flambe.util.Promise;
-import flambe.web.Web;
 
 class FlashPlatform
     implements Platform
@@ -48,14 +36,12 @@ class FlashPlatform
 
     public function init ()
     {
-        Log.info("Initializing Flash platform");
-
         var stage = Lib.current.stage;
 
         _stage = new FlashStage(stage);
         _pointer = new BasicPointer();
         _mouse = FlashMouse.shouldUse() ? new FlashMouse(_pointer, stage) : new DummyMouse();
-#if flambe_air
+#if air
         _touch = AirTouch.shouldUse() ? new AirTouch(_pointer, stage) : new DummyTouch();
 #else
         _touch = new DummyTouch();
@@ -70,22 +56,31 @@ class FlashPlatform
         Lib.current.loaderInfo.uncaughtErrorEvents.addEventListener(
             UncaughtErrorEvent.UNCAUGHT_ERROR, onUncaughtError);
 
-#if flash11_2
-        // TODO(bruno): ThrottleEvent may not be exactly right, but VisibilityEvent is broken and
-        // Event.ACTIVATE only handles focus
-        // TODO(bruno): Get the currently throttled state when the app starts?
+        // TODO(bruno): Get the currently visible state when the app starts?
+#if air
+        stage.addEventListener(Event.ACTIVATE, onActivate);
+        stage.addEventListener(Event.DEACTIVATE, onActivate);
+#else
+        // DEACTIVATE is fired when the Flash embed loses focus, so use throttle events in the
+        // browser instead to detect when the tab gets backgrounded
         stage.addEventListener(ThrottleEvent.THROTTLE, onThrottle);
+#end
         System.hidden.changed.connect(function (hidden,_) {
             if (!hidden) {
                 _skipFrame = true;
             }
         });
-#end
 
-// #if flambe_air
+// #if air
 //         // Ensure sound stops when the app is backgrounded or hardware muted on iOS
 //         SoundMixer.audioPlaybackMode = "ambient";
 // #end
+
+#if !air
+        // Hack to fix SharedObject in Chrome Flash:
+        // https://groups.google.com/forum/#!topic/flambe/aD6KUvORWks
+        getStorage();
+#end
 
         System.volume.watch(function (volume, _) {
             var s = SoundMixer.soundTransform;
@@ -96,6 +91,12 @@ class FlashPlatform
         _lastUpdate = Lib.getTimer();
         _skipFrame = false;
         _timeOffset = Date.now().getTime() - Lib.getTimer();
+
+#if debug
+        new DebugLogic(this);
+        _catapult = FlashCatapultClient.canUse() ? new FlashCatapultClient() : null;
+#end
+        Log.info("Initialized Flash platform", ["renderer", _renderer.type]);
     }
 
     public function loadAssetPack (manifest :Manifest) :Promise<AssetPack>
@@ -103,12 +104,12 @@ class FlashPlatform
         return new FlashAssetPackLoader(this, manifest).promise;
     }
 
-    public function getStage () :Stage
+    public function getStage () :StageSystem
     {
         return _stage;
     }
 
-    public function getStorage () :Storage
+    public function getStorage () :StorageSystem
     {
         if (_storage == null) {
             try {
@@ -122,22 +123,22 @@ class FlashPlatform
         return _storage;
     }
 
-    public function getPointer () :Pointer
+    public function getPointer () :PointerSystem
     {
         return _pointer;
     }
 
-    public function getMouse () :Mouse
+    public function getMouse () :MouseSystem
     {
         return _mouse;
     }
 
-    public function getTouch () :Touch
+    public function getTouch () :TouchSystem
     {
         return _touch;
     }
 
-    public function getKeyboard () :Keyboard
+    public function getKeyboard () :KeyboardSystem
     {
         if (_keyboard == null) {
             _keyboard = FlashKeyboard.shouldUse() ?
@@ -146,10 +147,10 @@ class FlashPlatform
         return _keyboard;
     }
 
-    public function getWeb () :Web
+    public function getWeb () :WebSystem
     {
         if (_web == null) {
-#if flambe_air
+#if air
             if (AirWeb.shouldUse()) {
                 _web = new AirWeb(_stage.nativeStage);
             } else {
@@ -163,7 +164,7 @@ class FlashPlatform
         return _web;
     }
 
-    public function getExternal () :External
+    public function getExternal () :ExternalSystem
     {
         if (_external == null) {
             _external = FlashExternal.shouldUse() ? new FlashExternal() : new DummyExternal();
@@ -171,15 +172,24 @@ class FlashPlatform
         return _external;
     }
 
-    public function getMotion () :Motion
+    public function getMotion () :MotionSystem
     {
         if (_motion == null) {
+#if air
+            if (AirMotion.shouldUse()) {
+                _motion = new AirMotion();
+            } else {
+                Log.warn("Accelerometer is unavailable");
+                _motion = new DummyMotion();
+            }
+#else
             _motion = new DummyMotion();
+#end
         }
         return _motion;
     }
 
-    public function getRenderer () :Renderer
+    public function getRenderer () :Stage3DRenderer
     {
         return _renderer;
     }
@@ -201,6 +211,11 @@ class FlashPlatform
     public function getTime () :Float
     {
         return (_timeOffset+Lib.getTimer()) / 1000;
+    }
+
+    public function getCatapultClient ()
+    {
+        return _catapult;
     }
 
     private function onEnterFrame (_)
@@ -231,28 +246,33 @@ class FlashPlatform
         System.uncaughtError.emit(FlashUtil.getErrorMessage(event.error));
     }
 
-#if flash11_2
+    private function onActivate (event :Event)
+    {
+        System.hidden._ = (event.type == Event.DEACTIVATE);
+    }
+
     private function onThrottle (event :ThrottleEvent)
     {
         System.hidden._ = (event.state != "resume");
     }
-#end
 
     // Statically initialized subsystems
-    private var _mouse :Mouse;
+    private var _mouse :MouseSystem;
     private var _pointer :BasicPointer;
-    private var _renderer :Renderer;
+    private var _renderer :Stage3DRenderer;
     private var _stage :FlashStage;
-    private var _touch :Touch;
+    private var _touch :TouchSystem;
 
     // Lazily initialized subsystems
-    private var _external :External;
-    private var _keyboard :Keyboard;
-    private var _motion :Motion;
-    private var _storage :Storage;
-    private var _web :Web;
+    private var _external :ExternalSystem;
+    private var _keyboard :KeyboardSystem;
+    private var _motion :MotionSystem;
+    private var _storage :StorageSystem;
+    private var _web :WebSystem;
 
     private var _lastUpdate :Int;
     private var _skipFrame :Bool;
     private var _timeOffset :Float;
+
+    private var _catapult :FlashCatapultClient;
 }

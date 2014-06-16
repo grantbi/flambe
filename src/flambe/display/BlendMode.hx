@@ -6,20 +6,42 @@ package flambe.display;
 
 /**
  * Blend mode used to composite a sprite.
- * https://en.wikipedia.org/wiki/Blend_modes
+ *
+ * See [Wikipedia](https://en.wikipedia.org/wiki/Blend_modes) for more info.
  */
-enum BlendMode {
-    /** Blends the source color on top of the destination, respecting transparency. */
+enum BlendMode
+{
+    /**
+     * Blends the source color on top of the destination, respecting transparency.
+     *
+     * <img src="https://aduros.com/flambe/images/BlendMode-Normal.png">
+     */
     Normal;
 
-    /** Adds the source and destination colors, lightening the final image. */
+    /**
+     * Adds the source and destination colors, lightening the final image.
+     *
+     * <img src="https://aduros.com/flambe/images/BlendMode-Add.png">
+     */
     Add;
 
     /**
-     * Ignores the destination color, and copies the source without handling transparency. NOTE:
-     * Supported only in the Stage3D renderer, everywhere else it's the same as Normal.
+     * Masks the overlapping area by applying the source alpha to the destination image.
      *
-     * This is an experimental blend mode and may be modified or removed in the future.
+     * __WARNING__: In HTML5 canvas, this blend mode is unbounded. It will clear the entire
+     * destination image, not just the bounds within the source image.
+     *
+     * <img src="https://aduros.com/flambe/images/BlendMode-Mask.png">
      */
-    CopyExperimental;
+    Mask;
+
+    /**
+     * Ignores the destination color, and copies the source without handling transparency.
+     *
+     * __WARNING__: In HTML5 canvas, this blend mode is unbounded. It will clear the entire
+     * destination image, not just the bounds within the source image.
+     *
+     * <img src="https://aduros.com/flambe/images/BlendMode-Copy.png">
+     */
+    Copy;
 }

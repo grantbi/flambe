@@ -1,39 +1,27 @@
-<img src="https://raw.github.com/aduros/flambe/master/tools/embedder/logo.png" width="72" height="72" align="absmiddle"> Flambe
+<img src="https://raw.github.com/aduros/flambe/master/command/data/scaffold/icons/72x72.png" width="72" height="72" align="absmiddle"> Flambe
 ======
 
-Flambe is an engine and asset pipeline for cross-platform multiplayer games.
+<a href="https://github.com/aduros/flambe/wiki/Showcase">
+<img src="https://raw.github.com/wiki/aduros/flambe/images/showcase-montage.jpg" width="710" height="428">
+</a>
 
-Written in Haxe, games are compiled to Flash and HTML5, with support for mobile
-devices. Server-side logic compiles to JS and runs on Node.js, for games that
-require multiplayer.
+Flambe is a 2D game engine that makes cross-platform development
+actually fun!
 
-Rendering in Flash uses Stage3D. The HTML5 renderer uses canvas, with
-plans for WebGL support later on.
+Written in Haxe, games are compiled to HTML5 and Flash, with support for
+mobile browsers. The HTML5 renderer uses WebGL, with fallback to canvas.
+Rendering in Flash uses Stage3D. Native Android and iOS apps are
+packaged using Adobe AIR.
 
-## Demos
+On top of being high performance and cross-platform, Flambe recognizes
+that assets and workflow are critical to game development. It includes
+battle-tested support for importing Flash animations, bitmap fonts, and
+particle systems. Live asset swapping lets you modify an asset and see
+the change in your game automatically, *with no recompile or refresh*.
+When you need to make a code change, Flambe recompiles and automatically
+refreshes your browser tab, all in under 2 seconds.
 
-Demos and more are on the [Flambe wiki].
-
-## Overview
-
-Flambe's design and roadmap are guided by a few philosophies:
-
-- Composition over inheritance: Flambe uses an entity/component system rather
-  than sprawling inheritance hierarchies. The composition pattern also comes up
-  repeatedly in other parts of Flambe's design.
-
-- Convention over configuration: Project layouts and APIs should have sensible
-  defaults. Manual configuration for unusual use cases should be possible, but
-  not required.
-
-- HTML5 and mobile web support is a high priority.
-
-- Flambe is a "clean break" from the Flash API which most Haxe game engines are
-  based on. The Flash API and its many quirks are a huge amount of work to
-  reliably port to other platforms (ask the NME guys) and wasn't designed to run
-  well on GPUs (ask the Starling guys). By writing against a smaller,
-  well-defined API designed for games, Flambe games can be much more portable,
-  optimized, and developed more rapidly.
+Check out the [Flambe wiki] for demos and more.
 
 ## Installing
 
@@ -41,10 +29,16 @@ See the [install guide] on the wiki.
 
 ## Hacking
 
-To build and develop Flambe from source, clone this repository and run
-`haxelib dev flambe /path/to/flambe/src` to use it. When you want to go
-back to a stable release, run `haxelib dev flambe`. Patches and pull
-requests are welcome!
+Patches and pull requests are welcome! To build and develop Flambe from
+source, clone this repository and run:
+
+```
+(sudo) npm link ./command
+haxelib dev flambe ./src
+```
+
+To later go back to a stable release, run `(sudo) flambe update` and
+`haxelib dev flambe`.
 
 Are things not working? I'd be happy to help, open an [issue], ask on
 the [forum], [email me] privately, or talk to me in #Haxe on

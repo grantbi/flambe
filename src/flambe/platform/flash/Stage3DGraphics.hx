@@ -18,14 +18,14 @@ import flambe.math.FMath;
 import flambe.util.Assert;
 
 class Stage3DGraphics
-    implements Graphics
+    implements InternalGraphics
 {
-    public function new (batcher :Stage3DBatcher, renderTarget :Stage3DTexture)
+    public function new (batcher :Stage3DBatcher, renderTarget :Stage3DTextureRoot)
     {
         _batcher = batcher;
         _renderTarget = renderTarget;
 
-        // Call reset() to set the size first
+        // Call onResize() to set the size first
         // _stateList = new DrawingState();
     }
 
@@ -92,12 +92,12 @@ class Stage3DGraphics
         _stateList = _stateList.prev;
     }
 
-    public function drawImage (texture :Texture, destX :Float, destY :Float)
+    public function drawTexture (texture :Texture, destX :Float, destY :Float)
     {
-        drawSubImage(texture, destX, destY, 0, 0, texture.width, texture.height);
+        drawSubTexture(texture, destX, destY, 0, 0, texture.width, texture.height);
     }
 
-    public function drawSubImage (texture :Texture, destX :Float, destY :Float,
+    public function drawSubTexture (texture :Texture, destX :Float, destY :Float,
         sourceX :Float, sourceY :Float, sourceW :Float, sourceH :Float)
     {
         var state = getTopState();
@@ -105,17 +105,19 @@ class Stage3DGraphics
             return;
         }
         var texture = Lib.as(texture, Stage3DTexture);
+        var root = texture.root;
+        root.assertNotDisposed();
 
         var pos = transformQuad(destX, destY, sourceW, sourceH);
-        var w = texture.width;
-        var h = texture.height;
-        var u1 = texture.maxU*sourceX / w;
-        var v1 = texture.maxV*sourceY / h;
-        var u2 = texture.maxU*(sourceX + sourceW) / w;
-        var v2 = texture.maxV*(sourceY + sourceH) / h;
+        var rootWidth = root.width;
+        var rootHeight = root.height;
+        var u1 = (texture.rootX+sourceX) / rootWidth;
+        var v1 = (texture.rootY+sourceY) / rootHeight;
+        var u2 = u1 + sourceW/rootWidth;
+        var v2 = v1 + sourceH/rootHeight;
         var alpha = state.alpha;
 
-        var offset = _batcher.prepareDrawImage(_renderTarget, state.blendMode, state.getScissor(), texture);
+        var offset = _batcher.prepareDrawTexture(_renderTarget, state.blendMode, state.getScissor(), texture);
         var data = _batcher.data;
 
         data[  offset] = pos[0];
@@ -150,10 +152,12 @@ class Stage3DGraphics
             return;
         }
         var texture = Lib.as(texture, Stage3DTexture);
+        var root = texture.root;
+        root.assertNotDisposed();
 
         var pos = transformQuad(x, y, width, height);
-        var u2 = texture.maxU * (width / texture.width);
-        var v2 = texture.maxV * (height / texture.height);
+        var u2 = width / root.width;
+        var v2 = height / root.height;
         var alpha = state.alpha;
 
         var offset = _batcher.prepareDrawPattern(_renderTarget, state.blendMode, state.getScissor(), texture);
@@ -248,11 +252,9 @@ class Stage3DGraphics
     {
         var state = getTopState();
         var rect = _scratchClipVector;
-
         rect[0] = x;
         rect[1] = y;
         // rect[2] = 0;
-
         rect[3] = x + width;
         rect[4] = y + height;
         // rect[5] = 0;
@@ -264,10 +266,31 @@ class Stage3DGraphics
         y = rect[1];
         width = rect[3] - x;
         height = rect[4] - y;
+
+        // Handle negative rectangles
+        if (width < 0) {
+            x += width;
+            width = -width;
+        }
+        if (height < 0) {
+            y += height;
+            height = -height;
+        }
+
         state.applyScissor(x, y, width, height);
     }
 
-    public function reset (width :Int, height :Int)
+    public function willRender ()
+    {
+        _batcher.willRender();
+    }
+
+    public function didRender ()
+    {
+        _batcher.didRender();
+    }
+
+    public function onResize (width :Int, height :Int)
     {
         var ortho = new Matrix3D(Vector.ofArray([
             2/width, 0, 0, 0,
@@ -326,7 +349,7 @@ class Stage3DGraphics
     })();
 
     private var _batcher :Stage3DBatcher;
-    private var _renderTarget :Stage3DTexture;
+    private var _renderTarget :Stage3DTextureRoot;
 
     private var _inverseProjection :Matrix3D;
     private var _stateList :DrawingState;

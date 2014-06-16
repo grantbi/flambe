@@ -6,27 +6,27 @@ package flambe.util;
 
 using StringTools;
 
-typedef ConfigSection = Hash<String>;
+typedef ConfigSection = Map<String,String>;
 
 /**
  * An INI-like config file parser.
  *
- * <pre>
+ * ```ini
  * ; This is a comment
  * foo = some value
  * [my section]
  * password = "  quotes are optional, and useful if you want to preserve surrounding spaces  "
- * </pre>
+ * ```
  */
 class Config
 {
     public var mainSection (default, null) :ConfigSection;
-    public var sections (default, null) :Hash<ConfigSection>;
+    public var sections (default, null) :Map<String,ConfigSection>;
 
     public function new ()
     {
         mainSection = new ConfigSection();
-        sections = new Hash();
+        sections = new Map();
     }
 
     /** Parse the contents of an INI file. */
@@ -62,7 +62,15 @@ class Config
                     // Trim off quotes
                     value = value.substr(1, value.length-2);
                 }
-                currentSection.set(key, value);
+                currentSection.set(key, value
+                    // Unescape certain characters
+                    .replace("\\n", "\n")
+                    .replace("\\r", "\r")
+                    .replace("\\t", "\t")
+                    .replace("\\'", "\'")
+                    .replace("\\\"", "\"")
+                    .replace("\\\\", "\\")
+                );
             }
         }
 
